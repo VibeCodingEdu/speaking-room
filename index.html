@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>חדר הדיבור</title>
+<meta name="theme-color" content="#2D5B57">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="חדר הדיבור">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&family=Frank+Ruhl+Libre:wght@500;700&family=Literata:opsz,wght@7..72,400;7..72,600&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>חדר הדיבור</h1>
+    <button class="chip" id="hdrChip" type="button" data-go="prog" title="ציון התמדה ל-14 הימים האחרונים">
+      התמדה <b id="hdrScore">0</b><span class="sep">·</span><span id="hdrStreak">0</span> ברצף<span class="sep">·</span>היום <span id="hdrToday">0</span> דק'
+    </button>
+  </header>
+
+  <main>
+    <!-- DRILL -->
+    <section class="panel" id="p-drill">
+      <div class="bar">
+        <span id="drillCount"></span>
+        <div class="meter" aria-hidden="true"><i id="drillMeter"></i></div>
+        <button class="link" type="button" id="deckToggle">נושאים</button>
+      </div>
+      <div class="decks" id="deckPick" hidden></div>
+      <div class="stage" id="stage"></div>
+      <p class="instr" id="drillHelp">לוחצים על המיקרופון, אומרים את המשפט באנגלית, והאפליקציה משווה למשפט הנכון. במחשב: <kbd>רווח</kbd> מיקרופון, <kbd>Enter</kbd> הצג תשובה, <kbd>L</kbd> השמע, <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> דירוג.</p>
+    </section>
+
+    <!-- CHAT -->
+    <section class="panel" id="p-chat" hidden>
+      <div id="chatPick" class="stage">
+        <span class="tag">שיחה עם בן שיח</span>
+        <p class="lead">בן השיח מדבר אליך בקול, אתה עונה בקול. אחרי כל תשובה תקבל תיקון אחד קטן, אם יש מה לתקן.</p>
+        <div class="list" id="chatList"></div>
+        <p class="muted small" id="chatNeedServer" hidden>השיחה דורשת חיבור לשרת. אפשר להגדיר בלשונית הגדרות.</p>
+      </div>
+      <div id="chatRoom" class="stage" hidden>
+        <div class="row between">
+          <span class="tag" id="chatTitle"></span>
+          <button class="b" type="button" id="chatEnd">סיים שיחה</button>
+        </div>
+        <div class="chatlog" id="chatLog" aria-live="polite"></div>
+        <div class="live en" id="chatLive"></div>
+        <div class="row center">
+          <button class="mic" type="button" id="chatMic" aria-label="דבר"><span class="dot"></span></button>
+        </div>
+        <div class="row center small muted" id="chatHint">לחץ על המיקרופון ודבר. לחיצה נוספת שולחת.</div>
+        <form class="row typebox" id="chatType">
+          <input id="chatInput" class="en" autocomplete="off" placeholder="או הקלד כאן" aria-label="תשובה בהקלדה">
+          <button class="b" type="submit">שלח</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- FREE TALK -->
+    <section class="panel" id="p-free" hidden>
+      <div class="stage">
+        <div class="row between">
+          <span class="tag">דקה אחת בלי לעצור</span>
+          <button class="b" id="nextTopic" type="button">נושא אחר</button>
+        </div>
+        <div class="prompt en" id="topicEn"></div>
+        <div class="instr" id="topicHe"></div>
+        <div class="row">
+          <span class="timer" id="timer">1:00</span>
+          <button class="b primary" id="freeGo" type="button">התחל לדבר</button>
+          <button class="b" id="listenTopic" type="button">השמע את השאלה</button>
+        </div>
+        <div class="live en" id="freeLive"></div>
+        <textarea id="speech" class="en" placeholder="מה שתגיד יופיע כאן. אפשר גם להקליד או לתקן." aria-label="מה שאמרת"></textarea>
+        <div class="row small muted" id="freeStats"></div>
+        <div class="row">
+          <button class="b primary" id="fbBtn" type="button">קבל תיקונים</button>
+          <span class="muted" id="fbStatus"></span>
+        </div>
+        <div class="fb" id="fb" hidden></div>
+      </div>
+    </section>
+
+    <!-- PROGRESS -->
+    <section class="panel" id="p-prog" hidden>
+      <div class="score">
+        <svg class="ring" viewBox="0 0 132 132" aria-hidden="true">
+          <circle cx="66" cy="66" r="56" fill="none" stroke="var(--sunk)" stroke-width="12"/>
+          <circle id="ringArc" cx="66" cy="66" r="56" fill="none" stroke="var(--accent)" stroke-width="12" stroke-linecap="round" stroke-dasharray="0 352" transform="rotate(-90 66 66)"/>
+          <text id="ringNum" x="66" y="76" text-anchor="middle" font-size="38" font-weight="700" fill="var(--fg)">0</text>
+        </svg>
+        <div class="minw">
+          <h2 id="scoreLabel">ציון התמדה</h2>
+          <p class="muted" id="scoreExplain"></p>
+        </div>
+      </div>
+      <div>
+        <div class="days" id="days"></div>
+        <div class="dlabels" id="dlabels"></div>
+      </div>
+      <div class="stats" id="stats"></div>
+      <h2>קצב דיבור בדקה החופשית</h2>
+      <div class="spark" id="wpm"></div>
+      <h2>איפה הכרטיסים עומדים</h2>
+      <div class="box" id="boxes"></div>
+      <h2>משפטים שעוד תוקעים</h2>
+      <div class="list" id="weak"></div>
+      <h2>תיקונים אחרונים</h2>
+      <div class="list" id="speechLog"></div>
+      <div class="row">
+        <button class="b" id="copySum" type="button">העתק סיכום ל-Claude</button>
+        <span class="muted" id="copyMsg"></span>
+      </div>
+      <textarea id="copyFallback" hidden readonly></textarea>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="panel" id="p-set" hidden>
+      <div class="stage">
+        <h2>חיבור לשרת</h2>
+        <p class="muted small">השרת (Google Apps Script שלך) מסנכרן את ההתקדמות בין המק לאייפון ומפעיל את התיקונים והשיחה. ההוראות בקובץ SETUP.md בריפו.</p>
+        <label class="field" for="srvUrl">כתובת השרת<input id="srvUrl" class="en" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off"></label>
+        <label class="field" for="srvSecret">סיסמת האפליקציה<input id="srvSecret" class="en" type="password" autocomplete="off"></label>
+        <div class="row">
+          <button class="b primary" type="button" id="srvSave">שמור ובדוק</button>
+          <button class="b" type="button" id="srvLink">העתק קישור לאייפון</button>
+          <span class="muted" id="srvMsg"></span>
+        </div>
+        <p class="sync" id="sync"></p>
+      </div>
+      <div class="stage">
+        <h2>קול ומיקרופון</h2>
+        <label class="field" for="voiceSel">קול הקריאה<select id="voiceSel"></select></label>
+        <label class="field" for="rateSel">מהירות<select id="rateSel"><option value="0.75">איטי</option><option value="0.9" selected>רגיל</option><option value="1">מהיר</option></select></label>
+        <label class="field" for="recLang">מבטא לזיהוי<select id="recLang"><option value="en-US">אמריקאי</option><option value="en-GB">בריטי</option></select></label>
+        <div class="row"><button class="b" type="button" id="micTest">בדוק מיקרופון</button><span class="muted en" id="micTestOut"></span></div>
+        <p class="muted small" id="micSupport"></p>
+      </div>
+      <div class="stage">
+        <h2>כרטיסים אישיים</h2>
+        <p class="muted small">משפטים עליך נשמרים רק בשרת שלך ולא בריפו הציבורי. מדביקים כאן את קובץ ה-JSON ש-Claude מכין, או בוחרים קובץ.</p>
+        <textarea id="cardsIn" class="en" placeholder='[{"id":"p1","he":"...","en":"..."}]'></textarea>
+        <div class="row">
+          <button class="b primary" type="button" id="cardsImport">ייבא</button>
+          <label class="b" for="cardsFile">בחר קובץ<input type="file" id="cardsFile" accept=".json,application/json" hidden></label>
+          <span class="muted" id="cardsMsg"></span>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<nav class="tabs" role="tablist">
+  <button role="tab" data-p="drill" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="12" rx="2"/><path d="M8 20h8"/></svg>תרגול</button>
+  <button role="tab" data-p="chat" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v10H9l-5 4z"/></svg>שיחה</button>
+  <button role="tab" data-p="free" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7"/><path d="M12 13V9M10 3h4"/></svg>דקה</button>
+  <button role="tab" data-p="prog" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V11M12 19V5M19 19v-6"/></svg>התקדמות</button>
+  <button role="tab" data-p="set" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>הגדרות</button>
+</nav>
+
+<script src="content.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
