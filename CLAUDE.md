@@ -49,3 +49,5 @@ To add personal cards: ask Mendy for his personal link (the key is the part afte
 * The drill scores the primary transcript only; alternatives are used only when the primary is clearly a mishearing (score under 0.5).
 * Level state (`S.level`) merges by newest `updatedAt`, in both merges. Day counters are stored per device (`S.days[date][deviceId]`) so Mac and iPhone add up. The merge rules exist twice (`mergeState` in `app.js` and in `Code.gs`); keep them identical.
 * AI models are chosen in `Code.gs` (`MODELS`): quick for chat turns and open answer checks, smart for free talk feedback.
+* Releases: bump `CACHE` in `sw.js` AND the `?v=N` on the script and style tags in `index.html` to the same N. GitHub Pages sends a 10 minute browser cache, so without the version query phones keep running the old app.
+* Microphone: the default engine is the on-device one (Whisper via transformers.js, `Xenova/whisper-base.en`), because it can pick the device. `openMic` skips virtual inputs (eqMac, Zoom, projectors, loopback); Mendy's Mac has eqMac first in the list and Chrome's default input was silent because of it. The browser recognizer is still available in Settings.
