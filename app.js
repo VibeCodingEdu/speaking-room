@@ -35,7 +35,8 @@ for(const lv in B.rows){
     if(!r) return;
     const [kind, topic, prompt, en, note, alt] = r;
     const c = {id:"b"+lv+"-"+String(i+1).padStart(3,"0"), bank:true, lv:Number(lv), topic, en, note:note||undefined, alt:alt||undefined};
-    if(kind==="f"){ c.d="fix"; c.bad=prompt; } else if(kind==="q"){ c.d="ask"; c.q=prompt; } else { c.d="bank"; c.he=prompt; }
+    if(kind==="f"){ c.d="fix"; c.bad=prompt; } else if(kind==="q"){ c.d="ask"; c.q=prompt; }
+    else if(kind==="x"){ c.d="bank"; c.src=prompt; c.task=r[6]||"אמור בעבר"; } else { c.d="bank"; c.he=prompt; }
     BANK_CARDS.push(c);
   });
 }
@@ -264,7 +265,7 @@ function renderWords(best){
 }
 
 /* ================= spaced repetition ================= */
-const SESSION=12, NEW_PER_DAY=8, INTERVAL=[0,1,2,4,7,14];
+const SESSION=14, NEW_PER_DAY=16, INTERVAL=[0,1,2,4,7,14];
 let enabled = new Set(prefs.decks || Object.keys(C.decks));
 let queue=[], pos=0, phase="ask", heard=null, suggested=0, rec=null;
 function bankAllowed(c){ const dk=TOPIC_DECK[c.topic]; return !dk || enabled.has(dk); }
@@ -286,10 +287,14 @@ function buildSession(){
   const t=today();
   const fixed=allCards().filter(c=>enabled.has(c.d)&&C.decks[c.d]);
   const reviewPool=fixed.concat(BANK_CARDS.filter(c=>bankAllowed(c)));
-  const due=reviewPool.filter(c=>S.srs[c.id]&&S.srs[c.id].due<=t).sort((a,b)=>S.srs[a.id].due.localeCompare(S.srs[b.id].due)||(S.srs[a.id].box-S.srs[b.id].box)).slice(0,7);
+  const due=reviewPool.filter(c=>S.srs[c.id]&&S.srs[c.id].due<=t).sort((a,b)=>S.srs[a.id].due.localeCompare(S.srs[b.id].due)||(S.srs[a.id].box-S.srs[b.id].box)).slice(0,6);
   const newToday=Object.values(S.srs).filter(r=>r.first===t&&!r.bank).length;
-  const lessonNew=fixed.filter(c=>!S.srs[c.id]).sort((a,b)=>(a.d==="lesson"?0:1)-(b.d==="lesson"?0:1)).slice(0,Math.min(3,Math.max(0,NEW_PER_DAY-newToday)));
-  const fresh=freshBank(Math.max(4,SESSION-due.length-lessonNew.length));
+  /* New lesson cards: newest material first, mixed across its decks */
+  const prio=d=>({lesson:0,past:1,goodwell:1,vocab:1,edsound:2,fix:2,ask:3}[d] ?? 4);
+  const unseen=shuffle(fixed.filter(c=>!S.srs[c.id])).sort((a,b)=>prio(a.d)-prio(b.d));
+  const lessonNew=[], perDeck={};
+  for(const c of unseen){ if(lessonNew.length>=Math.min(6,Math.max(0,NEW_PER_DAY-newToday))) break; if((perDeck[c.d]||0)>=2) continue; perDeck[c.d]=(perDeck[c.d]||0)+1; lessonNew.push(c); }
+  const fresh=freshBank(Math.max(3,SESSION-due.length-lessonNew.length));
   queue=shuffle(due.concat(lessonNew,fresh));
   pos=0; phase="ask"; heard=null;
 }
@@ -332,7 +337,8 @@ function rate(level){
   pos++; phase="ask"; heard=null; renderDrill();
 }
 function targetsOf(c){ return [c.en].concat(c.alt||[]); }
-function promptOf(c){ return c.d==="fix"?c.bad : c.d==="ask"?c.q : c.he; }
+function promptOf(c){ return c.src ? c.src : c.d==="fix"?c.bad : c.d==="ask"?c.q : c.he; }
+const isEnPrompt = c => !!(c.src || c.d==="fix" || c.d==="ask");
 
 function startMic(btn, live){
   if(rec){ rec.stop(); return; }
@@ -379,11 +385,11 @@ function renderDrill(){
   }
   const deck=C.decks[c.d]||{tag:""};
   const isNew=c.bank&&!S.srs[c.id];
-  const tagText = c.bank ? ((isNew?"חדש":"חזרה")+" · רמה "+c.lv+(c.d==="fix"?" · מצא ותקן":c.d==="ask"?" · שאלה פתוחה":"")) : deck.tag;
+  const tagText = c.bank ? ((isNew?"חדש":"חזרה")+" · רמה "+c.lv+(c.src?" · "+c.task:c.d==="fix"?" · מצא ותקן":c.d==="ask"?" · שאלה פתוחה":"")) : deck.tag;
   st.append(el("span",{class:"tag",text:tagText}));
-  st.append(el("div",{class:"prompt"+(c.d==="fix"||c.d==="ask"?" en":""),text:promptOf(c)}));
+  st.append(el("div",{class:"prompt"+(isEnPrompt(c)?" en":""),text:promptOf(c)}));
   if(c.d==="ask") st.append(el("div",{class:"row"},el("button",{class:"b",type:"button",onclick:()=>say(c.q),text:"השמע את השאלה"})));
-  st.append(el("div",{class:"instr",text: c.d==="fix"?"אמור בקול את המשפט הנכון." : c.d==="ask"?"ענה בקול במשפט שלם, על עצמך." : "אמור את זה באנגלית, בקול."}));
+  st.append(el("div",{class:"instr",text: c.src?(c.task||"אמור בעבר")+", בקול." : c.d==="fix"?"אמור בקול את המשפט הנכון." : c.d==="ask"?"ענה בקול במשפט שלם, על עצמך." : "אמור את זה באנגלית, בקול."}));
 
   const live=el("div",{class:"live en"});
   if(recOK){
@@ -461,7 +467,7 @@ document.addEventListener("keydown",e=>{
 });
 
 /* ================= AI prompts ================= */
-const SYSTEM_COACH = "You are an English speaking coach for Mendy, an Israeli adult whose first language is Hebrew. Level about A2 to B1: he reads well but speaks with basic grammar mistakes. Current focus: present simple (positive, negative, he/she/it + s, no am/is/are before a main verb, no -ing for habits), word order of time phrases and frequency adverbs, question form (do/does, can you...). His words come from speech-to-text, so ignore punctuation, capitals and obvious recognition glitches; judge grammar, word choice and natural phrasing only. Write Hebrew explanations short and plain. Never use em dashes or en dashes.";
+const SYSTEM_COACH = "You are an English speaking coach for Mendy, an Israeli adult whose first language is Hebrew. Level about A2 to B1: he reads well but speaks with basic grammar mistakes. Grammar covered so far, and what to watch: present simple (he/she/it + s, don't/doesn't + base verb, no am/is/are before a main verb, no -ing for habits and stative verbs like know/understand/like); past simple (regular verbs + ed, common irregular verbs, negative didn't + base verb: never \"didn't went\", never was/were before a main verb such as \"I was work\"); good vs well (good describes a noun or follows is/tastes/looks, well describes how an action is done); word order of time phrases and frequency adverbs; question form (do/does/did, can you...). Recent vocabulary: Diaspora, persecution, heritage, migration, revival. His words come from speech-to-text, so ignore punctuation, capitals and obvious recognition glitches; judge grammar, word choice and natural phrasing only. Write Hebrew explanations short and plain. Never use em dashes or en dashes.";
 
 /* ================= chat ================= */
 let chat=null, chatRec=null;

@@ -4,10 +4,12 @@
      kind "t": prompt is Hebrew, say it in English
      kind "f": prompt is a wrong English sentence, say the correct one
      kind "q": prompt is an English question, answer freely (english = sample answer)
+     kind "x": prompt is an English sentence to transform; 7th field = the task in Hebrew (default "אמור בעבר")
    Ids are built from level + position (b3-012). Only append rows to the END of a level, never insert
    in the middle or delete (that would shift ids). To retire a row, replace it with null.
    Grammar stays inside what the lessons covered: present simple (positive, negative, questions),
-   there is/are, can, need to, would like, frequency adverbs. Level controls length and clause count. */
+   there is/are, can, need to, would like, frequency adverbs; from lesson 2: past simple (positive, negative,
+   did questions), good vs well, the lesson 2 vocabulary. Level controls length and clause count. */
 window.BANK = {
   levels: [
     {n:1, name:"צעדים ראשונים", desc:"משפטים קצרים מאוד, אני ואתה, פעלים בסיסיים"},
@@ -52,7 +54,25 @@ window.BANK = {
       ["q","daily","What do you drink in the morning?","I drink coffee in the morning."],
       ["q","teach","What do you teach?","I teach English and history."],
       ["q","music","Do you play an instrument?","No, I don't. I only listen."],
-      ["q","daily","Do you read every day?","Yes, I read every day."]
+      ["q","daily","Do you read every day?","Yes, I read every day."],
+      ["t","daily","עבדתי אתמול.","I worked yesterday.","worked נשמע וורקט."],
+      ["t","daily","לא עבדתי אתמול.","I didn't work yesterday.","didn't + work, בלי ed."],
+      ["t","music","הקשבתי לבאך.","I listened to Bach."],
+      ["t","wine","שתינו יין.","We drank wine.","drink, drank."],
+      ["t","daily","הלכתי הביתה.","I went home.","go, went."],
+      ["t","daily","לא הלכתי.","I didn't go."],
+      ["t","whisky","הוא אהב את הוויסקי.","He liked the whisky."],
+      ["t","teach","היא לימדה היטב.","She taught well.","teach, taught. well אחרי פועל."],
+      ["t","daily","ישנתי טוב.","I slept well.","sleep, slept. slept well, לא slept good."],
+      ["t","daily","הוא מורה טוב.","He is a good teacher."],
+      ["f","daily","I was work yesterday.","I worked yesterday.","אין was לפני פועל."],
+      ["f","daily","I didn't went.","I didn't go."],
+      ["f","daily","I sleep good.","I sleep well."],
+      ["x","daily","I work.","I worked.",null,null,"אמור בעבר"],
+      ["x","daily","I go home.","I went home.",null,null,"אמור בעבר"],
+      ["x","music","We listen to music.","We listened to music.",null,null,"אמור בעבר"],
+      ["q","daily","Did you work yesterday?","Yes, I did. I worked at home.","Yes, I did. / No, I didn't."],
+      ["q","daily","Did you sleep well?","Yes, I slept well."]
     ],
     2: [
       ["t","whisky","היא לא שותה וויסקי.","She doesn't drink whisky."],
@@ -89,7 +109,28 @@ window.BANK = {
       ["q","daily","What don't you like to do?","I don't like to wait in lines."],
       ["q","teach","What does a teacher do every day?","A teacher prepares lessons and teaches students."],
       ["q","wine","When do you drink wine?","I usually drink wine on Shabbat."],
-      ["q","daily","Who cooks in your house?","My wife usually cooks, but sometimes I cook."]
+      ["q","daily","Who cooks in your house?","My wife usually cooks, but sometimes I cook."],
+      ["t","whisky","היא לא שתתה וויסקי במסיבה.","She didn't drink whisky at the party."],
+      ["t","music","הוא הקשיב לבטהובן אתמול בערב.","He listened to Beethoven last night.",null,["He listened to Beethoven yesterday evening."]],
+      ["t","daily","לא אכלתי ארוחת בוקר היום.","I didn't eat breakfast today."],
+      ["t","teach","התלמידים לא הבינו את השאלה.","The students didn't understand the question."],
+      ["t","lipchitz","ליפשיץ עבד בברונזה.","Lipchitz worked in bronze."],
+      ["t","wine","פתחנו בקבוק יין בשבת.","We opened a bottle of wine on Shabbat."],
+      ["t","daily","השיעור הסתיים בעשר.","The lesson ended at ten.","ended: הברה נוספת אחרי d.",["The lesson ended at 10."]],
+      ["t","music","התזמורת ניגנה טוב מאוד.","The orchestra played very well."],
+      ["t","daily","זה היה יום טוב.","It was a good day."],
+      ["t","teach","המורה לא הסבירה טוב.","The teacher didn't explain well."],
+      ["f","whisky","She didn't drank the whisky.","She didn't drink the whisky."],
+      ["f","music","He was listen to Mozart.","He listened to Mozart."],
+      ["f","daily","We wasn't go to the gym.","We didn't go to the gym."],
+      ["f","teach","She teaches very good.","She teaches very well."],
+      ["f","wine","This wine tastes well.","This wine tastes good."],
+      ["x","daily","She doesn't eat meat.","She didn't eat meat.",null,null,"אמור בעבר"],
+      ["x","music","He plays the piano.","He played the piano.",null,null,"אמור בעבר"],
+      ["x","teach","The students study for the test.","The students studied for the test.",null,null,"אמור בעבר"],
+      ["x","whisky","We taste the whisky.","We didn't taste the whisky.",null,null,"אמור בעבר ובשלילה"],
+      ["q","daily","What did you eat for breakfast today?","I ate bread and cheese, and I drank coffee."],
+      ["q","music","What music did you listen to this week?","I listened to Bach and to some Mozart."]
     ],
     3: [
       ["t","whisky","יש הרבה מזקקות באיילה.","There are many distilleries on Islay.","There are ברבים."],
@@ -126,7 +167,27 @@ window.BANK = {
       ["q","daily","What do you need to do today?","I need to teach, and I need to write."],
       ["q","lecture","Are there many people at your lectures?","Usually there are about thirty people."],
       ["q","wine","Where does good wine come from?","Good wine comes from France, Italy and Israel too."],
-      ["q","daily","What would you like to do this weekend?","I'd like to rest and read a good book."]
+      ["q","daily","What would you like to do this weekend?","I'd like to rest and read a good book."],
+      ["t","lecture","הכנתי את השקפים אתמול בלילה.","I prepared the slides last night."],
+      ["t","whisky","היו הרבה חביות במזקקה.","There were many casks in the distillery.","There were: עבר של there are."],
+      ["t","music","לא יכולתי לבוא לקונצרט.","I couldn't come to the concert.","can, could."],
+      ["t","daily","הייתי צריך לקנות לחם.","I needed to buy bread.",null,["I had to buy bread."]],
+      ["t","teach","מה התלמידים למדו היום?","What did the students learn today?","What did + פועל בבסיס."],
+      ["t","lipchitz","איפה ליפשיץ גר בפריז?","Where did Lipchitz live in Paris?"],
+      ["t","wine","כמה עלה הבקבוק?","How much did the bottle cost?"],
+      ["t","lecture","הוא דיבר היטב, אבל השקפים לא היו טובים.","He spoke well, but the slides weren't good."],
+      ["t","daily","לא היה זמן לארוחת צהריים.","There was no time for lunch.",null,["There wasn't time for lunch."]],
+      ["f","teach","What the students learned today?","What did the students learn today?"],
+      ["f","lipchitz","Where did he lived?","Where did he live?"],
+      ["f","whisky","There was many casks.","There were many casks."],
+      ["f","lecture","He spoke good.","He spoke well."],
+      ["f","daily","Did you went to work?","Did you go to work?"],
+      ["x","lecture","I need to prepare the slides.","I needed to prepare the slides.",null,null,"אמור בעבר"],
+      ["x","whisky","There are many distilleries on Islay.","There were many distilleries on Islay.",null,null,"אמור בעבר"],
+      ["x","music","Can you play this piece?","Could you play this piece?",null,null,"אמור בעבר"],
+      ["q","daily","Where did you go last weekend?","Last weekend I went to my parents' house."],
+      ["q","lecture","Did you understand the last lecture you heard?","Yes, I did. The speaker spoke well."],
+      ["q","whisky","Which whisky did you try first, and did you like it?","I tried a Scotch first. I didn't like it, but now I love it."]
     ],
     4: [
       ["t","whisky","אני אוהב וויסקי מאיילה כי הוא מעושן.","I like whisky from Islay because it is smoky.",null,["I like whisky from Islay because it's smoky."]],
@@ -160,7 +221,26 @@ window.BANK = {
       ["q","teach","What do your students like, and what don't they like?","They like stories, but they don't like tests."],
       ["q","lecture","How do you prepare for a lecture?","I write notes, I make slides, and I practice out loud."],
       ["q","wine","Which wine goes well with fish?","White wine goes well with fish because it is light."],
-      ["q","daily","When do you have time to read?","I read at night, when the house is quiet."]
+      ["q","daily","When do you have time to read?","I read at night, when the house is quiet."],
+      ["t","whisky","טעמתי את הוויסקי מאיילה, אבל לא אהבתי אותו בהתחלה.","I tasted the whisky from Islay, but I didn't like it at first."],
+      ["t","music","כשהייתי צעיר, הקשבתי הרבה לבטהובן.","When I was young, I listened to Beethoven a lot."],
+      ["t","teach","התלמידים לא הבינו כי דיברתי מהר מדי.","The students didn't understand because I spoke too fast.",null,["The students didn't understand because I spoke too quickly."]],
+      ["t","lecture","ההרצאה הלכה טוב, והקהל שאל שאלות טובות.","The lecture went well, and the audience asked good questions."],
+      ["t","lipchitz","ליפשיץ הגיע לפריז ב-1909 ופגש אמנים צעירים.","Lipchitz came to Paris in 1909 and met young artists."],
+      ["t","daily","אתמול קמתי מוקדם, אבל לא הלכתי לחדר כושר.","Yesterday I got up early, but I didn't go to the gym."],
+      ["t","wine","פתחנו בקבוק יין כשהחברים הגיעו.","We opened a bottle of wine when our friends arrived."],
+      ["t","teach","היא לימדה טוב כי היא הכינה את השיעור.","She taught well because she prepared the lesson."],
+      ["t","daily","לא ישנתי טוב, אז שתיתי שני כוסות קפה.","I didn't sleep well, so I drank two cups of coffee."],
+      ["f","teach","They didn't understood because I spoke fast.","They didn't understand because I spoke fast."],
+      ["f","lecture","The lecture went good and they asked well questions.","The lecture went well, and they asked good questions."],
+      ["f","daily","Yesterday I was get up early.","Yesterday I got up early."],
+      ["f","lipchitz","When he was arrive in Paris, he meet Picasso.","When he arrived in Paris, he met Picasso."],
+      ["x","music","When I am tired, I listen to quiet music.","When I was tired, I listened to quiet music.",null,null,"אמור בעבר"],
+      ["x","teach","The students understand when I speak slowly.","The students understood when I spoke slowly.",null,null,"אמור בעבר"],
+      ["x","whisky","I don't like smoky whisky, but my friend loves it.","I didn't like smoky whisky, but my friend loved it.",null,null,"אמור בעבר"],
+      ["q","daily","What did you do last Friday, and what didn't you have time for?","Last Friday I cooked and cleaned, but I didn't have time to read."],
+      ["q","lecture","Tell me about a lecture that went well. Why did it go well?","My last lecture went well because I prepared it and I spoke slowly."],
+      ["q","teach","What did your students learn this week, and did they learn it well?","They learned about the past tense, and most of them learned it well."]
     ],
     5: [
       ["t","lipchitz","ליפשיץ, שנולד בליטא, מגיע לפריז כשהוא בן שמונה עשרה.","Lipchitz, who was born in Lithuania, comes to Paris when he is eighteen.","בהרצאה מספרים היסטוריה בהווה."],
@@ -188,7 +268,24 @@ window.BANK = {
       ["q","lecture","What is the main idea of your research, in simple words?","My research looks at letters between an artist and a religious leader, and what each one gives the other."],
       ["q","teach","What makes a lesson good, in your opinion?","A good lesson has one clear idea, and the students talk more than the teacher."],
       ["q","music","Which piece of music do you know very well, and when do you listen to it?","I know the Goldberg Variations well. I listen to them when I write."],
-      ["q","daily","Describe a normal Thursday from morning to night.","I get up early, I teach until the afternoon, I study in the evening, and I go to bed late."]
+      ["q","daily","Describe a normal Thursday from morning to night.","I get up early, I teach until the afternoon, I study in the evening, and I go to bed late."],
+      ["t","lipchitz","ליפשיץ, שנולד בליטא, הגיע לפריז כשהיה בן שמונה עשרה.","Lipchitz, who was born in Lithuania, came to Paris when he was eighteen."],
+      ["t","lipchitz","בפריז הוא פגש אמנים ששינו את האמנות המודרנית.","In Paris he met artists who changed modern art."],
+      ["t","lipchitz","ב-1941 הוא ברח לאמריקה והתחיל חיים חדשים בניו יורק.","In 1941 he fled to America and started a new life in New York.","flee, fled.",["In 1941 he escaped to America and started a new life in New York."]],
+      ["t","lecture","רוב החוקרים לא קראו את המכתבים האלה, ולכן הם לא הבינו את הקשר.","Most researchers didn't read these letters, so they didn't understand the connection."],
+      ["t","whisky","המזקקה שביקרנו בה השתמשה בכבול, ולכן לוויסקי היה טעם של עשן.","The distillery that we visited used peat, so the whisky tasted of smoke."],
+      ["t","teach","המורה שלימד אותי אנגלית לא דיבר עברית בשיעור.","The teacher who taught me English didn't speak Hebrew in class."],
+      ["t","daily","הקהילה שמרה על המורשת שלה גם אחרי ההגירה.","The community kept its heritage even after the migration."],
+      ["t","lecture","אחרי המלחמה הייתה תחייה של החיים היהודיים בתפוצות.","After the war there was a revival of Jewish life in the Diaspora."],
+      ["f","lipchitz","In 1941 he was flee to America.","In 1941 he fled to America."],
+      ["f","lecture","Most researchers didn't read the letters, so they didn't understood.","Most researchers didn't read the letters, so they didn't understand."],
+      ["f","teach","The teacher who teached me didn't spoke Hebrew.","The teacher who taught me didn't speak Hebrew."],
+      ["f","daily","The community was keep its heritage.","The community kept its heritage."],
+      ["x","lipchitz","In Paris he meets artists who change modern art.","In Paris he met artists who changed modern art.",null,null,"אמור בעבר"],
+      ["x","lecture","The researchers who write about him don't know the letters.","The researchers who wrote about him didn't know the letters.",null,null,"אמור בעבר"],
+      ["q","lipchitz","Tell Lipchitz's story in the past tense, in four sentences.","He was born in Lithuania. He came to Paris in 1909. He met Picasso and Modigliani. In 1941 he fled to America."],
+      ["q","daily","How did your family's heritage change after migration?","My family kept the traditions, but they didn't keep the old language."],
+      ["q","lecture","What did you learn about persecution in your studies?","I learned that persecution changed communities, but it didn't destroy them."]
     ],
     6: [
       ["t","lecture","אני חושב שהסיפור הזה חשוב כי הוא מראה איך דת ואמנות מדברות זו עם זו.","I think this story matters because it shows how religion and art talk to each other.",null,["I think this story is important because it shows how religion and art speak to each other."]],
@@ -212,7 +309,22 @@ window.BANK = {
       ["q","teach","How do you use AI in your teaching, and what worries you about it?","I use it to prepare materials, but I worry that students stop thinking for themselves."],
       ["q","music","Do you think music and religion are connected? Why?","Yes, I think so. Both try to express something that words can't say."],
       ["q","whisky","A friend who doesn't drink whisky asks you to explain why you like it. What do you say?","I like it because every bottle tells a story about a place, the water, the wood and the time."],
-      ["q","daily","What does success look like for you at the end of this year?","Success for me is to stand in front of an audience and speak English without fear."]
+      ["q","daily","What does success look like for you at the end of this year?","Success for me is to stand in front of an audience and speak English without fear."],
+      ["t","lecture","כשהתחלתי את המחקר, לא ציפיתי למצוא כל כך הרבה מכתבים.","When I began the research, I didn't expect to find so many letters."],
+      ["t","lecture","המכתבים הראו שהקשר היה אישי, ולא רק רשמי.","The letters showed that the relationship was personal, not only formal."],
+      ["t","lipchitz","ליפשיץ לא תיאר את עצמו כאדם דתי, ובכל זאת הוא ביקש עצה.","Lipchitz didn't describe himself as a religious man, and yet he asked for advice."],
+      ["t","lecture","אחרי השואה, רבים חשבו שהחיים היהודיים בתפוצות לא ישרדו.","After the Holocaust, many people thought that Jewish life in the Diaspora wouldn't survive."],
+      ["t","lecture","בפרק הבא אני מציג מה קרה כשהם נפגשו לראשונה.","In the next chapter I present what happened when they first met."],
+      ["t","teach","ההרצאה הלכה טוב כי דיברתי לאט והשתמשתי בדוגמאות טובות.","The lecture went well because I spoke slowly and used good examples."],
+      ["f","lecture","When I began the research, I didn't expected so many letters.","When I began the research, I didn't expect so many letters."],
+      ["f","lecture","The letters was show a personal relationship.","The letters showed a personal relationship."],
+      ["f","lecture","The talk went good because I used well examples.","The talk went well because I used good examples."],
+      ["f","lipchitz","He didn't described himself as religious, but he was ask for advice.","He didn't describe himself as religious, but he asked for advice."],
+      ["x","lecture","I don't claim that there is a direct influence.","I didn't claim that there was a direct influence.",null,null,"אמור בעבר"],
+      ["x","lecture","The letters show something different.","The letters showed something different.",null,null,"אמור בעבר"],
+      ["q","lecture","What surprised you most when you began your research?","I didn't expect the letters to be so personal. That surprised me."],
+      ["q","lecture","Someone asks: did Lipchitz change after the war? What do you answer?","Yes, he did. His work became more Jewish, and he looked for meaning in his heritage."],
+      ["q","teach","Tell me about a lesson that didn't go well. What did you learn from it?","Once I spoke too fast, and the students didn't understand. I learned to slow down."]
     ]
   },
   topics: {
