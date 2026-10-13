@@ -240,8 +240,8 @@ function listenWeb(opts){
   return { stop(){ if(finished) return; stopped=true; try{ rec&&rec.stop(); }catch(e){ finish(); } timers.push(setTimeout(finish, 2500)); } };
 }
 /* ===== On-device engine: records with the microphone and transcribes with Whisper in the browser.
-   Independent of Apple's / Google's recognizer, works in the home screen app. Model downloads once (~40MB) and is cached. */
-const WHISPER_MODEL = "Xenova/whisper-tiny.en";
+   Independent of Apple's / Google's recognizer, works in the home screen app. Model downloads once (~80MB) and is cached. */
+const WHISPER_MODEL = "Xenova/whisper-base.en";
 let whisperPipe=null, whisperLoading=null;
 function loadWhisper(onProgress){
   if(window.__mockWhisper) return Promise.resolve(window.__mockWhisper);
@@ -295,7 +295,7 @@ function listenWhisper(opts){
   try{ ctx=new (window.AudioContext||window.webkitAudioContext)(); ctx.resume&&ctx.resume(); rate=ctx.sampleRate; }catch(e){ fail("audio-capture"); return {stop(){}}; }
   if("speechSynthesis" in window) speechSynthesis.cancel();
   status("starting");
-  navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}}).then(st=>{
+  openMic().then(st=>{
     if(finished){ st.getTracks().forEach(t=>t.stop()); return; }
     stream=st; src=ctx.createMediaStreamSource(st);
     try{ const tr=st.getAudioTracks()[0]; opts.onDevice&&opts.onDevice(tr&&tr.label||""); }catch(e){}
@@ -321,12 +321,38 @@ function listenWhisper(opts){
   }).catch(e=>fail(e&&e.name==="NotAllowedError"?"not-allowed":"audio-capture"));
   return { stop(){ if(finished) return; stopped=true; finish(); } };
 }
+/* Pick a real microphone. Virtual devices (eqMac, Zoom, projectors, loopback drivers) often sit
+   first in the list and deliver pure silence, which is what broke recognition on the Mac. */
+const VIRTUAL_MIC=/eqmac|zoom|virtual|blackhole|loopback|soundflower|projector|teams|krisp|obs|camo|airfoil|audio hijack/i;
+function rankMic(d){
+  const l=d.label||""; if(!l) return 0;
+  if(VIRTUAL_MIC.test(l)) return -100;
+  let r=0;
+  if(/built-in|macbook|internal|מובנה|iphone microphone|מיקרופון ה-/i.test(l)) r+=10;
+  if(/^(default|ברירת מחדל)/i.test(l)) r-=1;
+  if(/iphone/i.test(l) && /mac/i.test(navigator.platform||"")) r-=5;
+  return r;
+}
+async function micList(){
+  let ins=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="audioinput");
+  if(ins.length && !ins.some(d=>d.label)){ try{ const t=await navigator.mediaDevices.getUserMedia({audio:true}); t.getTracks().forEach(x=>x.stop()); ins=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="audioinput"); }catch(e){} }
+  return ins;
+}
+async function openMic(){
+  const base={echoCancellation:true,noiseSuppression:true,autoGainControl:true};
+  let pick=null;
+  try{
+    const ins=await micList();
+    pick = ins.find(d=>prefs.micId && d.deviceId===prefs.micId) || ins.slice().sort((a,b)=>rankMic(b)-rankMic(a))[0] || null;
+  }catch(e){}
+  try{ return await navigator.mediaDevices.getUserMedia({audio:Object.assign({},base, pick&&pick.deviceId?{deviceId:{exact:pick.deviceId}}:{})}); }
+  catch(e){ if(e&&e.name==="NotAllowedError") throw e; return navigator.mediaDevices.getUserMedia({audio:base}); }
+}
 /* Engine choice: "auto" uses the browser recognizer, and switches to the on-device engine for good
    on this device if the browser recognizer fails. */
 function engineNow(){
-  if(prefs.engine==="web") return SR?"web":"whisper";
-  if(prefs.engine==="whisper") return "whisper";
-  return (!SR || store.get("webFailed",false)) ? "whisper" : "web";
+  if(prefs.engine==="web" && SR) return "web";
+  return HAS_GUM ? "whisper" : (SR ? "web" : "none");
 }
 const WEB_FAIL = new Set(["no-audio","no-result","service-not-allowed","network","language-not-supported","start","audio-capture"]);
 let webEmpty=0;
@@ -857,9 +883,10 @@ $("#copySum").onclick=async()=>{
 function fillSettings(){
   $("#srvUrl").value=prefs.url||""; $("#srvSecret").value=prefs.secret||"";
   $("#rateSel").value=String(prefs.rate); $("#recLang").value=prefs.recLang;
-  $("#engineSel").value=prefs.engine||"auto";
+  $("#engineSel").value=prefs.engine==="web"?"web":(prefs.engine||"auto");
+  fillMics();
   const eng=engineNow();
-  $("#micSupport").textContent = !recOK ? "הדפדפן הזה לא תומך במיקרופון." : eng==="whisper" ? "פעיל עכשיו: מנוע זיהוי בתוך המכשיר (Whisper). בפעם הראשונה הוא מוריד כ-40MB, ואחר כך עובד גם בלי אינטרנט." : "פעיל עכשיו: זיהוי הדיבור של הדפדפן.";
+  $("#micSupport").textContent = !recOK ? "הדפדפן הזה לא תומך במיקרופון." : eng==="whisper" ? "פעיל עכשיו: מנוע זיהוי בתוך המכשיר (Whisper). בפעם הראשונה הוא מוריד כ-80MB, ואחר כך עובד גם בלי אינטרנט." : "פעיל עכשיו: זיהוי הדיבור של הדפדפן.";
 }
 $("#srvSave").onclick=async()=>{
   prefs.url=$("#srvUrl").value.trim(); prefs.secret=$("#srvSecret").value.trim(); savePrefs();
@@ -877,6 +904,14 @@ $("#srvLink").onclick=async()=>{
 $("#voiceSel").onchange=e=>{ prefs.voice=e.target.value; savePrefs(); say("Smoky whisky comes from Islay."); };
 $("#rateSel").onchange=e=>{ prefs.rate=Number(e.target.value); savePrefs(); say("I listen to Bach when I work."); };
 $("#recLang").onchange=e=>{ prefs.recLang=e.target.value; savePrefs(); };
+$("#micSel").onchange=e=>{ prefs.micId=e.target.value; savePrefs(); };
+async function fillMics(){
+  const sel=$("#micSel"); if(!sel||!HAS_GUM) return;
+  let ins=[]; try{ ins=await micList(); }catch(e){}
+  sel.textContent=""; sel.append(el("option",{value:"",text:"אוטומטי (מדלג על התקנים וירטואליים)"}));
+  for(const d of ins){ if(/^(default|ברירת מחדל)/i.test(d.label)) continue; sel.append(el("option",{value:d.deviceId,text:(d.label||"מיקרופון")+(VIRTUAL_MIC.test(d.label)?" (וירטואלי)":"")})); }
+  sel.value=prefs.micId||"";
+}
 $("#engineSel").onchange=e=>{ prefs.engine=e.target.value; savePrefs(); store.set("webFailed",false); fillSettings(); if(prefs.engine==="whisper") loadWhisper(()=>{}).catch(()=>{}); };
 function micTestStart(){
   const out=$("#micTestOut"), lvl=$("#micLevel"); if(!recOK){ out.textContent="לא נתמך כאן."; return; }

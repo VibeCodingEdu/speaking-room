@@ -141,7 +141,8 @@
         <h2>קול ומיקרופון</h2>
         <label class="field" for="voiceSel">קול הקריאה<select id="voiceSel"></select></label>
         <label class="field" for="rateSel">מהירות<select id="rateSel"><option value="0.75">איטי</option><option value="0.9" selected>רגיל</option><option value="1">מהיר</option></select></label>
-        <label class="field" for="engineSel">מנוע זיהוי דיבור<select id="engineSel"><option value="auto">אוטומטי</option><option value="web">של הדפדפן (אפל או גוגל)</option><option value="whisper">בתוך המכשיר (Whisper)</option></select></label>
+        <label class="field" for="micSel">מיקרופון<select id="micSel"><option value="">אוטומטי</option></select></label>
+        <label class="field" for="engineSel">מנוע זיהוי דיבור<select id="engineSel"><option value="auto">אוטומטי (בתוך המכשיר)</option><option value="whisper">בתוך המכשיר (Whisper)</option><option value="web">של הדפדפן (אפל או גוגל)</option></select></label>
         <label class="field" for="recLang">מבטא לזיהוי<select id="recLang"><option value="en-US">אמריקאי</option><option value="en-GB">בריטי</option></select></label>
         <div class="row"><button class="b" type="button" id="micTest">בדוק מיקרופון</button><button class="b" type="button" id="micPlay" hidden>השמע הקלטה</button><span class="muted" id="micTestOut"></span></div>
         <p class="muted small" id="micLevel"></p>
