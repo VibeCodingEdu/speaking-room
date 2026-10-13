@@ -265,15 +265,17 @@ function resample(data, from, to){
 }
 function listenWhisper(opts){
   let finished=false, stopped=false, stream=null, ctx=null, node=null, src=null;
-  const chunks=[]; let rate=48000, heardSpeech=false, lastLoud=0, startT=Date.now();
+  const chunks=[]; let rate=48000, heardSpeech=false, lastLoud=0, startT=Date.now(), peak=0, floor=1;
   const status=st=>opts.onStatus&&opts.onStatus(st);
   const timers=[];
   function cleanup(){ timers.forEach(clearTimeout); try{ node&&node.disconnect(); src&&src.disconnect(); }catch(e){} try{ stream&&stream.getTracks().forEach(t=>t.stop()); }catch(e){} try{ ctx&&ctx.close(); }catch(e){} }
   function fail(code){ if(finished) return; finished=true; cleanup(); opts.onError&&opts.onError(code); }
   async function finish(){
     if(finished) return; finished=true; cleanup();
-    if(!heardSpeech){ opts.onDone&&opts.onDone("",[""]); return; }
     let len=0; chunks.forEach(c=>len+=c.length);
+    if(!len){ opts.onError&&opts.onError("no-input"); return; }
+    if(peak<0.002){ opts.onError&&opts.onError("mic-silent"); return; }
+    if(len/rate<0.5){ opts.onDone&&opts.onDone("",[""]); return; }
     const all=new Float32Array(len); let o=0; chunks.forEach(c=>{ all.set(c,o); o+=c.length; });
     const audio=resample(all, rate, 16000);
     try{
@@ -295,21 +297,24 @@ function listenWhisper(opts){
     if(finished){ st.getTracks().forEach(t=>t.stop()); return; }
     stream=st; src=ctx.createMediaStreamSource(st);
     node=ctx.createScriptProcessor(4096,1,1);
-    let noise=0.004;
     node.onaudioprocess=ev=>{
       if(finished||stopped) return;
       const d=ev.inputBuffer.getChannelData(0); chunks.push(new Float32Array(d));
       let sum=0; for(let i=0;i<d.length;i++) sum+=d[i]*d[i];
       const rms=Math.sqrt(sum/d.length), now=Date.now();
-      if(now-startT<600) noise=Math.max(noise, rms*1.5);
-      if(rms>Math.max(0.012, noise*2.2)){ lastLoud=now; if(!heardSpeech){ heardSpeech=true; status("speech"); } }
+      /* Voice detection only decides when to stop after a pause. The quietest moment sets the floor,
+         so speaking right away, or a quiet microphone, no longer hides the speech. */
+      peak=Math.max(peak,rms); if(rms>0) floor=Math.min(floor,rms);
+      opts.onLevel&&opts.onLevel(peak);
+      if(rms>Math.max(0.003, floor*3)){ lastLoud=now; if(!heardSpeech){ heardSpeech=true; status("speech"); } }
       /* single answer: stop by itself after a pause */
       if(!opts.continuous && heardSpeech && now-lastLoud>1500){ stopped=true; finish(); }
     };
     src.connect(node); node.connect(ctx.destination);
     status("audio");
     timers.push(setTimeout(()=>{ if(!opts.continuous){ stopped=true; finish(); } }, 20000));
-    timers.push(setTimeout(()=>{ if(!opts.continuous && !heardSpeech && !stopped){ stopped=true; finish(); } }, 8000));
+    timers.push(setTimeout(()=>{ if(!opts.continuous && !heardSpeech && !stopped){ stopped=true; finish(); } }, 10000));
+    timers.push(setTimeout(()=>{ if(!chunks.length && !finished){ fail(ctx&&ctx.state!=="running"?"ctx-suspended":"no-input"); } }, 3000));
   }).catch(e=>fail(e&&e.name==="NotAllowedError"?"not-allowed":"audio-capture"));
   return { stop(){ if(finished) return; stopped=true; finish(); } };
 }
@@ -345,6 +350,9 @@ function micErrorText(code){
             "language-not-supported":"השפה לא נתמכת. נסה מבטא אחר בהגדרות.",
             "switched":"זיהוי הדיבור של הדפדפן לא עובד במכשיר הזה, אז עברתי למנוע זיהוי שרץ בתוך המכשיר. לחץ שוב על המיקרופון ודבר. בפעם הראשונה הוא נטען כחצי דקה.",
             "model":"מנוע הזיהוי לא נטען. בדוק חיבור לאינטרנט ונסה שוב.",
+            "no-input":"המיקרופון אושר, אבל לא מגיע ממנו קול לדפדפן. בדוק שאף אפליקציה אחרת לא משתמשת במיקרופון, וסגור ופתח את הדפדפן.",
+            "ctx-suspended":"הדפדפן לא הפעיל את השמע. לחץ שוב על המיקרופון.",
+            "mic-silent":"מהמיקרופון מגיע שקט מוחלט. במק: הגדרות מערכת, צליל, קלט, בחר מיקרופון ובדוק שהפס זז כשאתה מדבר. באייפון: הגדרות, Safari, מיקרופון, אפשר.",
             "no-audio":"המיקרופון לא נפתח."+(IS_STANDALONE?" באפליקציה שעל מסך הבית אפל חוסמת לפעמים זיהוי דיבור: פתח את האתר ישירות ב-Safari, או השתמש בהכתבה במקלדת למטה.":" בדוק בהגדרות האתר שהמיקרופון מותר, או השתמש בהכתבה במקלדת למטה."),
             "no-result":"המיקרופון פתוח, אבל זיהוי הדיבור לא החזיר מילים."+(IS_STANDALONE?" זה קורה באפליקציה שעל מסך הבית: פתח ישירות ב-Safari, או השתמש בהכתבה במקלדת למטה.":" ודא שהכתבה מופעלת בהגדרות המכשיר, או השתמש בהכתבה במקלדת למטה.") })[code] || "המיקרופון לא הצליח ("+code+"). נסה שוב.";
 }
@@ -867,12 +875,20 @@ $("#voiceSel").onchange=e=>{ prefs.voice=e.target.value; savePrefs(); say("Smoky
 $("#rateSel").onchange=e=>{ prefs.rate=Number(e.target.value); savePrefs(); say("I listen to Bach when I work."); };
 $("#recLang").onchange=e=>{ prefs.recLang=e.target.value; savePrefs(); };
 $("#engineSel").onchange=e=>{ prefs.engine=e.target.value; savePrefs(); store.set("webFailed",false); fillSettings(); if(prefs.engine==="whisper") loadWhisper(()=>{}).catch(()=>{}); };
-$("#micTest").onclick=()=>{
-  const out=$("#micTestOut"); if(!recOK){ out.textContent="לא נתמך כאן."; return; }
-  out.textContent="דבר עכשיו...";
-  out.textContent=stageText("starting");
-  listen({onStatus:(st,p)=>{ out.textContent=stageText(st,p); }, onText:t=>out.textContent=t, onDone:t=>out.textContent=t?("נקלט: "+t):"המיקרופון נפתח אבל לא חזרו מילים.", onError:c=>out.textContent=micErrorText(c)});
-};
+function micTestStart(){
+  const out=$("#micTestOut"), lvl=$("#micLevel"); if(!recOK){ out.textContent="לא נתמך כאן."; return; }
+  const eng=engineNow();
+  out.textContent=stageText("starting"); lvl.textContent="מנוע: "+(eng==="whisper"?"בתוך המכשיר":"של הדפדפן");
+  const r=listen({
+    onStatus:(st,p)=>{ out.textContent=stageText(st,p); },
+    onLevel:p=>{ lvl.textContent="מנוע: בתוך המכשיר. עוצמת קול מקסימלית: "+Math.round(p*1000)+" (שקט: פחות מ-3. דיבור רגיל: 20 ומעלה)"; },
+    onText:t=>{ out.textContent=t; },
+    onDone:t=>{ out.textContent=t?("נקלט: "+t):"נקלט קול, אבל לא זוהו מילים. דבר קרוב יותר ובקול רגיל."; $("#micTest").onclick=micTestStart; },
+    onError:c=>{ out.textContent=micErrorText(c); $("#micTest").onclick=micTestStart; }
+  });
+  $("#micTest").onclick=()=>{ r&&r.stop&&r.stop(); };
+}
+$("#micTest").onclick=micTestStart;
 /* Personal cards: personal.enc.json (AES-GCM, key from PBKDF2 of the personal key). See tools/personal.mjs. */
 function normCard(c){
   if(!c||!c.id||!c.en||!(c.he||c.q||c.bad||c.src)) return null;
