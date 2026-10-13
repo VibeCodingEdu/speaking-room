@@ -278,11 +278,13 @@ function listenWhisper(opts){
     if(len/rate<0.5){ opts.onDone&&opts.onDone("",[""]); return; }
     const all=new Float32Array(len); let o=0; chunks.forEach(c=>{ all.set(c,o); o+=c.length; });
     const audio=resample(all, rate, 16000);
+    window.__lastAudio={data:all, rate};
     try{
       status("loading");
       const pipe=await loadWhisper(pct=>opts.onStatus&&opts.onStatus("loading",pct));
       status("transcribing");
       const out=await pipe(audio, audio.length>16000*28 ? {chunk_length_s:30, stride_length_s:5} : {});
+      window.__lastRaw=out&&out.text; console.log("[speaking-room] whisper raw:", JSON.stringify(out&&out.text), "seconds:", (audio.length/16000).toFixed(1), "peak:", peak.toFixed(4));
       let t=String((out&&out.text)||"").replace(/\[[^\]]*\]|\([^)]*\)/g," ").replace(/\s+/g," ").trim();
       if(/^(thank you\.?|thanks for watching\.?|you)$/i.test(t)) t="";
       if(t) opts.onText&&opts.onText(t);
@@ -296,6 +298,7 @@ function listenWhisper(opts){
   navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}}).then(st=>{
     if(finished){ st.getTracks().forEach(t=>t.stop()); return; }
     stream=st; src=ctx.createMediaStreamSource(st);
+    try{ const tr=st.getAudioTracks()[0]; opts.onDevice&&opts.onDevice(tr&&tr.label||""); }catch(e){}
     node=ctx.createScriptProcessor(4096,1,1);
     node.onaudioprocess=ev=>{
       if(finished||stopped) return;
@@ -877,18 +880,24 @@ $("#recLang").onchange=e=>{ prefs.recLang=e.target.value; savePrefs(); };
 $("#engineSel").onchange=e=>{ prefs.engine=e.target.value; savePrefs(); store.set("webFailed",false); fillSettings(); if(prefs.engine==="whisper") loadWhisper(()=>{}).catch(()=>{}); };
 function micTestStart(){
   const out=$("#micTestOut"), lvl=$("#micLevel"); if(!recOK){ out.textContent="לא נתמך כאן."; return; }
-  const eng=engineNow();
+  const eng=engineNow(); let dev="";
   out.textContent=stageText("starting"); lvl.textContent="מנוע: "+(eng==="whisper"?"בתוך המכשיר":"של הדפדפן");
   const r=listen({
     onStatus:(st,p)=>{ out.textContent=stageText(st,p); },
-    onLevel:p=>{ lvl.textContent="מנוע: בתוך המכשיר. עוצמת קול מקסימלית: "+Math.round(p*1000)+" (שקט: פחות מ-3. דיבור רגיל: 20 ומעלה)"; },
+    onDevice:label=>{ dev=label; },
+    onLevel:p=>{ lvl.textContent="מנוע: בתוך המכשיר. מיקרופון: "+(dev||"לא ידוע")+". עוצמת קול מקסימלית: "+Math.round(p*1000)+" (שקט: פחות מ-3. דיבור רגיל: 20 ומעלה)"; },
     onText:t=>{ out.textContent=t; },
-    onDone:t=>{ out.textContent=t?("נקלט: "+t):"נקלט קול, אבל לא זוהו מילים. דבר קרוב יותר ובקול רגיל."; $("#micTest").onclick=micTestStart; },
+    onDone:t=>{ out.textContent=t?("נקלט: "+t):"נקלט קול, אבל לא זוהו מילים. לחץ \"השמע הקלטה\" ובדוק אם שומעים אותך."+(window.__lastRaw?" (המנוע החזיר: "+window.__lastRaw+")":""); $("#micPlay").hidden=!window.__lastAudio; $("#micTest").onclick=micTestStart; },
     onError:c=>{ out.textContent=micErrorText(c); $("#micTest").onclick=micTestStart; }
   });
   $("#micTest").onclick=()=>{ r&&r.stop&&r.stop(); };
 }
 $("#micTest").onclick=micTestStart;
+$("#micPlay").onclick=()=>{
+  const a=window.__lastAudio; if(!a) return;
+  try{ const c=new (window.AudioContext||window.webkitAudioContext)(), b=c.createBuffer(1,a.data.length,a.rate); b.getChannelData(0).set(a.data);
+    const src=c.createBufferSource(); src.buffer=b; src.connect(c.destination); src.start(); src.onended=()=>c.close(); }catch(e){}
+};
 /* Personal cards: personal.enc.json (AES-GCM, key from PBKDF2 of the personal key). See tools/personal.mjs. */
 function normCard(c){
   if(!c||!c.id||!c.en||!(c.he||c.q||c.bad||c.src)) return null;
