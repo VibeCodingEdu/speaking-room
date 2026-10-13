@@ -417,6 +417,7 @@ const CONTR=[[/\bcan't\b/g,"can not"],[/\bcannot\b/g,"can not"],[/\bwon't\b/g,"w
 function tokens(s){
   let t=String(s).toLowerCase().replace(/[’`]/g,"'");
   for(const [re,rep] of CONTR) t=t.replace(re,rep);
+  t=t.replace(/\b(\d{1,2}):00\b/g,"$1").replace(/\b(\d{1,2}):(\d{2})\b/g,"$1 $2");
   t=t.replace(/whiskey/g,"whisky").replace(/\bisla\b|\beila\b|\beyela\b/g,"islay").replace(/-/g," ");
   return t.replace(/[^a-z0-9' ]+/g," ").split(/\s+/).filter(Boolean).map(w=>NUM[w]||w.replace(/'/g,""));
 }
