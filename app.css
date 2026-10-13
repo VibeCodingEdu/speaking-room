@@ -163,3 +163,7 @@ button.item:hover{border-color:var(--sea)}
 #levelBox p{margin:0}
 .toast{position:fixed;inset-inline:16px;bottom:calc(var(--nav) + env(safe-area-inset-bottom,0px) + 16px);margin:0 auto;max-width:440px;background:var(--fg);color:var(--bg);padding:12px 16px;border-radius:12px;font-weight:600;text-align:center;opacity:0;transform:translateY(10px);transition:opacity .3s,transform .3s;z-index:20}
 .toast.show{opacity:1;transform:none}
+
+/* keyboard dictation fallback */
+.kbd-dict summary{cursor:pointer;color:var(--sea);font-weight:600;font-size:.9rem;padding-block:4px}
+.kbd-dict .typebox{margin-top:8px}

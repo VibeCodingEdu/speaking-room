@@ -180,53 +180,74 @@ function say(text, onend){
 /* ================= voice in ================= */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const recOK = !!SR;
+const IS_STANDALONE = !!(window.navigator.standalone || (window.matchMedia && matchMedia("(display-mode: standalone)").matches));
 function listen(opts){
-  /* opts: {continuous, onText(text, final), onDone(finalText, alts), onError(code)} */
-  let stopped=false, finals=[], alts=[], rec=null, interim="";
+  /* opts: {continuous, onText(text), onStatus(stage), onDone(finalText, alts), onError(code)}
+     stages: "starting" > "audio" (mic open) > "sound" > "speech" */
+  let stopped=false, finished=false, finals=[], alts=[], rec=null, interim="", gotResult=false, gotAudio=false;
+  const timers=[];
+  const status=st=>{ opts.onStatus&&opts.onStatus(st); };
+  function text(){ return finals.filter(Boolean).join(" ").replace(/\s+/g," ").trim(); }
+  function commitInterim(){ if(interim.trim()){ finals.push(interim.trim()); alts.push([interim.trim()]); interim=""; } }
+  function finish(){
+    if(finished) return; finished=true; timers.forEach(clearTimeout);
+    commitInterim();
+    const t=text(), altList=alts.filter(Boolean);
+    opts.onDone && opts.onDone(t, altList.length===1 ? altList[0] : [t]);
+  }
+  function fail(code){ if(finished) return; finished=true; stopped=true; timers.forEach(clearTimeout); try{ rec&&rec.abort(); }catch(e){} opts.onError&&opts.onError(code); }
   function make(){
     rec=new SR();
     rec.lang=prefs.recLang||"en-US";
     rec.interimResults=true;
     rec.continuous=!!opts.continuous;
     rec.maxAlternatives=3;
-    let base=finals.length;
+    const base=finals.length;
+    rec.onaudiostart=()=>{ gotAudio=true; status("audio"); };
+    rec.onsoundstart=()=>status("sound");
+    rec.onspeechstart=()=>status("speech");
     rec.onresult=ev=>{
-      interim="";
+      gotResult=true; interim="";
       for(let i=ev.resultIndex;i<ev.results.length;i++){
         const r=ev.results[i];
-        if(r.isFinal){
-          finals[base+i]=r[0].transcript.trim();
-          alts[base+i]=Array.from(r).map(a=>a.transcript.trim());
-        } else interim+=r[0].transcript;
+        if(r.isFinal){ finals[base+i]=r[0].transcript.trim(); alts[base+i]=Array.from(r).map(a=>a.transcript.trim()); }
+        else interim+=r[0].transcript;
       }
-      opts.onText && opts.onText(text()+(interim?" "+interim:""), false);
+      opts.onText && opts.onText((text()+" "+interim).trim());
     };
-    rec.onerror=ev=>{ if(ev.error==="no-speech"||ev.error==="aborted") return; stopped=true; opts.onError&&opts.onError(ev.error); };
+    rec.onerror=ev=>{
+      if(ev.error==="aborted") return;
+      if(ev.error==="no-speech"){ if(!opts.continuous) finish(); return; }
+      fail(ev.error);
+    };
     rec.onend=()=>{
-      if(!stopped && opts.continuous){ try{ make(); rec.start(); return; }catch(e){} }
+      if(finished) return;
+      if(!stopped && opts.continuous){ commitInterim(); try{ make(); rec.start(); return; }catch(e){} }
       finish();
     };
   }
-  let finished=false;
-  function text(){ return finals.filter(Boolean).join(" ").replace(/\s+/g," ").trim(); }
-  function finish(){
-    if(finished) return; finished=true;
-    let t=text(); if(!t && interim) t=interim.trim();
-    const altList = alts.filter(Boolean);
-    let options=[t];
-    if(altList.length===1) options=altList[0];
-    opts.onDone && opts.onDone(t, options);
+  function begin(){
+    if(finished) return;
+    try{ make(); rec.start(); status("starting"); }catch(e){ fail("start"); return; }
+    /* Watchdogs: the mic never opened, or it opened but nothing came back */
+    timers.push(setTimeout(()=>{ if(!gotAudio&&!gotResult) fail("no-audio"); }, 4000));
+    if(!opts.continuous) timers.push(setTimeout(()=>{ if(!gotResult){ stopped=true; try{ rec.stop(); }catch(e){} timers.push(setTimeout(()=>{ if(!finished){ finished=true; opts.onError&&opts.onError("no-result"); } },1500)); } }, 12000));
   }
-  if("speechSynthesis" in window) speechSynthesis.cancel();
-  make();
-  try{ rec.start(); }catch(e){ opts.onError&&opts.onError("start"); }
-  return { stop(){ stopped=true; try{ rec.stop(); }catch(e){ finish(); } setTimeout(finish, 1500); } };
+  /* Let any speech output release the audio first (iPhone keeps the speaker session otherwise) */
+  if("speechSynthesis" in window && (speechSynthesis.speaking||speechSynthesis.pending)){ speechSynthesis.cancel(); setTimeout(begin, 400); }
+  else { if("speechSynthesis" in window) speechSynthesis.cancel(); begin(); }
+  return { stop(){ if(finished) return; stopped=true; try{ rec&&rec.stop(); }catch(e){ finish(); } timers.push(setTimeout(finish, 2500)); } };
 }
 function micErrorText(code){
   return ({ "not-allowed":"אין הרשאה למיקרופון. בדפדפן: הגדרות האתר, אפשר מיקרופון.",
             "service-not-allowed":"זיהוי הדיבור כבוי. באייפון: הגדרות, כללי, מקלדת, הפעל הכתבה. במק: הגדרות מערכת, מקלדת, הכתבה.",
             "audio-capture":"לא נמצא מיקרופון.", "network":"אין חיבור לשירות זיהוי הדיבור.",
-            "language-not-supported":"השפה לא נתמכת. נסה מבטא אחר בהגדרות." })[code] || "המיקרופון לא הצליח ("+code+"). נסה שוב.";
+            "language-not-supported":"השפה לא נתמכת. נסה מבטא אחר בהגדרות.",
+            "no-audio":"המיקרופון לא נפתח."+(IS_STANDALONE?" באפליקציה שעל מסך הבית אפל חוסמת לפעמים זיהוי דיבור: פתח את האתר ישירות ב-Safari, או השתמש בהכתבה במקלדת למטה.":" בדוק בהגדרות האתר שהמיקרופון מותר, או השתמש בהכתבה במקלדת למטה."),
+            "no-result":"המיקרופון פתוח, אבל זיהוי הדיבור לא החזיר מילים."+(IS_STANDALONE?" זה קורה באפליקציה שעל מסך הבית: פתח ישירות ב-Safari, או השתמש בהכתבה במקלדת למטה.":" ודא שהכתבה מופעלת בהגדרות המכשיר, או השתמש בהכתבה במקלדת למטה.") })[code] || "המיקרופון לא הצליח ("+code+"). נסה שוב.";
+}
+const STAGE_TEXT={starting:"פותח מיקרופון...", audio:"מקשיב. דבר עכשיו.", sound:"שומע קול...", speech:"שומע דיבור..."};
+function stageText(st){ return STAGE_TEXT[st]||"";
 }
 
 /* ================= comparing ================= */
@@ -341,30 +362,42 @@ function targetsOf(c){ return [c.en].concat(c.alt||[]); }
 function promptOf(c){ return c.src ? c.src : c.d==="fix"?c.bad : c.d==="ask"?c.q : c.he; }
 const isEnPrompt = c => !!(c.src || c.d==="fix" || c.d==="ask");
 
+function scoreSaid(t, options){
+  const c=queue[pos]; if(!c||!t) return;
+  const d=dayRec(); d.said++;
+  if(c.d==="ask"){ heard={score:1, said:t, open:true}; }
+  else {
+    /* Score what was actually heard. Recognition alternatives only rescue a clear mishearing,
+       otherwise they would hide real grammar slips (she drink / she drinks). */
+    heard=compare([t], targetsOf(c));
+    if(heard.score<0.5){ const b2=compare(options||[t], targetsOf(c)); if(b2&&b2.score>heard.score) heard=b2; }
+    d.accSum+=Math.round(heard.score*100);
+  }
+  suggested = heard.open ? 0 : heard.score>=0.92 ? 1 : heard.score>=0.7 ? 2 : 3;
+  phase="shown"; touch(); persist(); renderDrill(); say(c.en);
+}
 function startMic(btn, live){
   if(rec){ rec.stop(); return; }
-  const c=queue[pos];
-  btn.classList.add("on"); live.textContent="מקשיב...";
+  btn.classList.add("on"); live.textContent=stageText("starting");
+  let words=false;
   rec=listen({
-    onText:t=>{ live.textContent=t; },
+    onStatus:st=>{ if(!words) live.textContent=stageText(st); },
+    onText:t=>{ words=true; live.textContent=t; },
     onDone:(t,options)=>{
       rec=null; btn.classList.remove("on");
-      if(!t){ live.textContent="לא נקלט דיבור. נסה שוב, קצת יותר קרוב למיקרופון."; return; }
-      const d=dayRec(); d.said++;
-      if(c.d==="ask"){ heard={score:1, said:t, open:true}; }
-      else {
-        /* Score what was actually heard. Recognition alternatives only rescue a clear mishearing,
-           otherwise they would hide real grammar slips (she drink / she drinks). */
-        heard=compare([t], targetsOf(c));
-        if(heard.score<0.5){ const b2=compare(options, targetsOf(c)); if(b2&&b2.score>heard.score) heard=b2; }
-        d.accSum+=Math.round(heard.score*100);
-      }
-      suggested = heard.open ? 0 : heard.score>=0.92 ? 1 : heard.score>=0.7 ? 2 : 3;
-      phase="shown"; touch(); persist(); renderDrill(); say(c.en);
+      if(!t){ live.textContent="לא נקלטו מילים. לחץ שוב ודבר מיד, או השתמש בהכתבה במקלדת למטה."; return; }
+      scoreSaid(t, options);
     },
     onError:code=>{ rec=null; btn.classList.remove("on"); live.textContent=micErrorText(code); }
   });
   touch();
+}
+/* Keyboard dictation fallback: works everywhere, including the home screen app (use the keyboard mic key) */
+function typeBox(){
+  const inp=el("input",{class:"en",id:"typeSaid",autocomplete:"off",autocapitalize:"off",spellcheck:"false",lang:"en",placeholder:"לחץ כאן ואז על המיקרופון שבמקלדת"});
+  const f=el("form",{class:"row typebox"},inp,el("button",{class:"b",type:"submit",text:"בדוק"}));
+  f.addEventListener("submit",e=>{ e.preventDefault(); const v=inp.value.trim(); if(v) scoreSaid(v,[v]); });
+  return el("details",{class:"kbd-dict"},el("summary",{text:"הכתבה במקלדת"}),f);
 }
 
 function renderDrill(){
@@ -398,6 +431,7 @@ function renderDrill(){
     mic.addEventListener("click",()=>startMic(mic,live));
     st.append(el("div",{class:"row center"},mic), live);
   }
+  st.append(typeBox());
   if(phase==="ask"){
     st.append(el("div",{class:"row center"},
       el("button",{class:"b",type:"button",onclick:()=>{ phase="shown"; heard=null; suggested=0; touch(); renderDrill(); say(c.en); }},
@@ -495,9 +529,10 @@ $("#chatMic").onclick=()=>{
   const btn=$("#chatMic"), live=$("#chatLive");
   if(chatRec){ chatRec.stop(); return; }
   if(!recOK){ live.textContent="הדפדפן לא תומך בזיהוי דיבור. אפשר להקליד למטה."; return; }
-  btn.classList.add("on"); live.textContent="מקשיב...";
+  btn.classList.add("on"); live.dataset.w=""; live.textContent=stageText("starting");
   chatRec=listen({continuous:true,
-    onText:t=>{ live.textContent=t; },
+    onStatus:st=>{ if(!live.dataset.w) live.textContent=stageText(st); },
+    onText:t=>{ live.dataset.w="1"; live.textContent=t; },
     onDone:t=>{ chatRec=null; btn.classList.remove("on"); live.textContent=""; if(t) sendChat(t); },
     onError:code=>{ chatRec=null; btn.classList.remove("on"); live.textContent=micErrorText(code); }});
   touch();
@@ -545,9 +580,11 @@ $("#freeGo").onclick=()=>{ if(freeT) stopFree(); else startFree(); };
 function startFree(){
   freeBase=$("#speech").value.trim(); freeStart=Date.now(); $("#fb").hidden=true; freeEntry=null;
   $("#freeGo").textContent="עצור"; $("#freeStats").textContent="";
+  $("#freeLive").dataset.w="";
   if(recOK){
     freeRec=listen({continuous:true,
-      onText:t=>{ $("#freeLive").textContent=t.split(" ").slice(-14).join(" "); $("#speech").value=(freeBase?freeBase+" ":"")+t; },
+      onStatus:st=>{ if(!$("#freeLive").dataset.w) $("#freeLive").textContent=stageText(st); },
+      onText:t=>{ $("#freeLive").dataset.w="1"; $("#freeLive").textContent=t.split(" ").slice(-14).join(" "); $("#speech").value=(freeBase?freeBase+" ":"")+t; },
       onDone:t=>{ freeRec=null; if(t) $("#speech").value=(freeBase?freeBase+" ":"")+t; $("#freeLive").textContent=""; finishFree(); },
       onError:code=>{ freeRec=null; $("#freeLive").textContent=micErrorText(code); }});
   }
@@ -728,7 +765,8 @@ $("#recLang").onchange=e=>{ prefs.recLang=e.target.value; savePrefs(); };
 $("#micTest").onclick=()=>{
   const out=$("#micTestOut"); if(!recOK){ out.textContent="לא נתמך כאן."; return; }
   out.textContent="דבר עכשיו...";
-  listen({onText:t=>out.textContent=t, onDone:t=>out.textContent=t?("נקלט: "+t):"לא נקלט כלום.", onError:c=>out.textContent=micErrorText(c)});
+  out.textContent=stageText("starting");
+  listen({onStatus:st=>{ out.textContent=stageText(st); }, onText:t=>out.textContent=t, onDone:t=>out.textContent=t?("נקלט: "+t):"המיקרופון נפתח אבל לא חזרו מילים.", onError:c=>out.textContent=micErrorText(c)});
 };
 /* Personal cards: personal.enc.json (AES-GCM, key from PBKDF2 of the personal key). See tools/personal.mjs. */
 function normCard(c){
