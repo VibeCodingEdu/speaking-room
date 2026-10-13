@@ -179,6 +179,8 @@ function say(text, onend){
 
 /* ================= voice in ================= */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+/* Chromium browsers accept a MediaStreamTrack in start(); Safari does not and always uses the system input */
+const USE_TRACK = /Chrome|Chromium|Edg\//.test(navigator.userAgent) && !/iPhone|iPad|CriOS|EdgiOS/.test(navigator.userAgent);
 const HAS_GUM = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 const recOK = !!SR || HAS_GUM;
 const IS_STANDALONE = !!(window.navigator.standalone || (window.matchMedia && matchMedia("(display-mode: standalone)").matches));
@@ -191,12 +193,14 @@ function listenWeb(opts){
   function text(){ return finals.filter(Boolean).join(" ").replace(/\s+/g," ").trim(); }
   function commitInterim(){ if(interim.trim()){ finals.push(interim.trim()); alts.push([interim.trim()]); interim=""; } }
   function finish(){
-    if(finished) return; finished=true; timers.forEach(clearTimeout);
+    if(finished) return; finished=true; timers.forEach(clearTimeout); releaseMic();
     commitInterim();
     const t=text(), altList=alts.filter(Boolean);
     opts.onDone && opts.onDone(t, altList.length===1 ? altList[0] : [t]);
   }
-  function fail(code){ if(finished) return; finished=true; stopped=true; timers.forEach(clearTimeout); try{ rec&&rec.abort(); }catch(e){} opts.onError&&opts.onError(code); }
+  let track=null, stream=null;
+  const releaseMic=()=>{ try{ stream&&stream.getTracks().forEach(t=>t.stop()); }catch(e){} };
+  function fail(code){ if(finished) return; finished=true; stopped=true; timers.forEach(clearTimeout); try{ rec&&rec.abort(); }catch(e){} releaseMic(); opts.onError&&opts.onError(code); }
   function make(){
     rec=new SR();
     rec.lang=prefs.recLang||"en-US";
@@ -223,13 +227,18 @@ function listenWeb(opts){
     };
     rec.onend=()=>{
       if(finished) return;
-      if(!stopped && opts.continuous){ commitInterim(); try{ make(); rec.start(); return; }catch(e){} }
+      if(!stopped && opts.continuous){ commitInterim(); try{ make(); startRec(); return; }catch(e){} }
       finish();
     };
   }
-  function begin(){
+  /* Chrome can listen to a chosen microphone track. Without it, Chrome uses its own default input,
+     which on Mendy's Mac was the silent eqMac device. */
+  function startRec(){ if(track){ try{ rec.start(track); return; }catch(e){} } rec.start(); }
+  async function begin(){
     if(finished) return;
-    try{ make(); rec.start(); status("starting"); }catch(e){ fail("start"); return; }
+    if(USE_TRACK && HAS_GUM){ try{ stream=await openMic(); track=stream.getAudioTracks()[0]||null; }catch(e){ if(e&&e.name==="NotAllowedError"){ fail("not-allowed"); return; } } }
+    if(finished){ releaseMic(); return; }
+    try{ make(); startRec(); status("starting"); }catch(e){ fail("start"); return; }
     /* Watchdogs: the mic never opened, or it opened but nothing came back */
     timers.push(setTimeout(()=>{ if(!gotAudio&&!gotResult) fail("no-audio"); }, 4000));
     if(!opts.continuous) timers.push(setTimeout(()=>{ if(!gotResult){ stopped=true; try{ rec.stop(); }catch(e){} timers.push(setTimeout(()=>{ if(!finished){ finished=true; opts.onError&&opts.onError("no-result"); } },1500)); } }, 12000));
@@ -363,8 +372,9 @@ async function openMic(){
 /* Engine choice: "auto" uses the browser recognizer, and switches to the on-device engine for good
    on this device if the browser recognizer fails. */
 function engineNow(){
-  if(prefs.engine==="web" && SR) return "web";
-  return HAS_GUM ? "whisper" : (SR ? "web" : "none");
+  if(prefs.engine==="whisper") return HAS_GUM ? "whisper" : "web";
+  if(prefs.engine==="web") return SR ? "web" : "whisper";
+  return (!SR || store.get("webFailed",false)) ? "whisper" : "web";
 }
 const WEB_FAIL = new Set(["no-audio","no-result","service-not-allowed","network","language-not-supported","start","audio-capture"]);
 let webEmpty=0;
@@ -895,7 +905,7 @@ $("#copySum").onclick=async()=>{
 function fillSettings(){
   $("#srvUrl").value=prefs.url||""; $("#srvSecret").value=prefs.secret||"";
   $("#rateSel").value=String(prefs.rate); $("#recLang").value=prefs.recLang;
-  $("#engineSel").value=prefs.engine==="web"?"web":(prefs.engine||"auto");
+  $("#engineSel").value=prefs.engine||"auto";
   fillMics();
   const eng=engineNow();
   $("#micSupport").textContent = !recOK ? "הדפדפן הזה לא תומך במיקרופון." : eng==="whisper" ? "פעיל עכשיו: מנוע זיהוי בתוך המכשיר (Whisper). בפעם הראשונה הוא מוריד כ-80MB, ואחר כך עובד גם בלי אינטרנט." : "פעיל עכשיו: זיהוי הדיבור של הדפדפן.";

@@ -14,7 +14,7 @@
 <link rel="icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&family=Frank+Ruhl+Libre:wght@500;700&family=Literata:opsz,wght@7..72,400;7..72,600&display=swap">
-<link rel="stylesheet" href="app.css?v=11">
+<link rel="stylesheet" href="app.css?v=12">
 </head>
 <body>
 <div class="wrap">
@@ -142,7 +142,7 @@
         <label class="field" for="voiceSel">קול הקריאה<select id="voiceSel"></select></label>
         <label class="field" for="rateSel">מהירות<select id="rateSel"><option value="0.75">איטי</option><option value="0.9" selected>רגיל</option><option value="1">מהיר</option></select></label>
         <label class="field" for="micSel">מיקרופון<select id="micSel"><option value="">אוטומטי</option></select></label>
-        <label class="field" for="engineSel">מנוע זיהוי דיבור<select id="engineSel"><option value="auto">אוטומטי (בתוך המכשיר)</option><option value="whisper">בתוך המכשיר (Whisper)</option><option value="web">של הדפדפן (אפל או גוגל)</option></select></label>
+        <label class="field" for="engineSel">מנוע זיהוי דיבור<select id="engineSel"><option value="auto">אוטומטי</option><option value="web">של הדפדפן (אפל או גוגל)</option><option value="whisper">בתוך המכשיר (Whisper)</option></select></label>
         <label class="field" for="recLang">מבטא לזיהוי<select id="recLang"><option value="en-US">אמריקאי</option><option value="en-GB">בריטי</option></select></label>
         <div class="row"><button class="b" type="button" id="micTest">בדוק מיקרופון</button><button class="b" type="button" id="micPlay" hidden>השמע הקלטה</button><span class="muted" id="micTestOut"></span></div>
         <p class="muted small" id="micLevel"></p>
@@ -167,8 +167,8 @@
   <button role="tab" data-p="set" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>הגדרות</button>
 </nav>
 
-<script src="content.js?v=11"></script>
-<script src="bank.js?v=11"></script>
-<script src="app.js?v=11"></script>
+<script src="content.js?v=12"></script>
+<script src="bank.js?v=12"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
