@@ -5,6 +5,7 @@ Mendy's daily English speaking practice app. He takes private speaking lessons 2
 Live at https://vibecodingedu.github.io/speaking-room/ (GitHub Pages, branch main, root). Static files only, no build step.
 
 ## Files
+* `bank.js`: leveled sentence bank for fresh random practice (see Levels below).
 * `content.js`: all public practice content (decks, cards, free talk topics, chat scenarios, lesson log). This is what changes after each lesson.
 * `app.js`: the app (drill with speech recognition and word diff, AI chat partner, one minute free talk with words per minute, progress and persistence score, settings).
 * `app.css`, `index.html`, `sw.js`, `manifest.webmanifest`, `icons/`.
@@ -17,6 +18,14 @@ Mendy pastes Jonathan's lesson summary (corrections, vocabulary, homework, attac
 3. Card ids are permanent and unique (`l11`, `f16`, ...). Never renumber or reuse an id; progress is stored by id. To retire a card, delete it; do not reuse its id.
 4. Bump `CACHE` in `sw.js` (`speaking-room-vN`) so phones pick up the change.
 5. Commit and push to main.
+
+## Levels and the sentence bank
+* `bank.js` holds about 180 general sentences in six levels (`BANK.levels`, `BANK.rows[level]`), plus free talk topics per level. Each daily session = up to 7 due reviews + up to 3 new lesson cards + fresh bank sentences at the current level (one stretch sentence from the level above), shuffled.
+* Bank ids are positional (`b3-012`). Only append rows at the end of a level; never insert, reorder or delete (replace a retired row with `null`).
+* Level engine (`recordLevel` in `app.js`): only the FIRST attempt at a bank sentence of the current level counts. Score = average of recognition accuracy and the self rating (95/72/35). After 25 attempts: average 85+ and 70%+ fluent moves up; after 15: average under 60 or 40%+ misses moves down. A fresh sentence rated fluent on first try goes to box 4 (back in a week); others enter normal repetition.
+* Grammar in the bank must stay inside what the lessons have covered. When a lesson adds a structure, add rows using it to the right levels (append only) and say so in the lesson entry.
+* Keep each level well stocked: when the summary shows he has seen most rows of his level, add 30 to 40 more.
+* Later, with the server running, live generation by Claude can add fresh sentences on top of the bank.
 
 ## Personal content stays out of this repo
 The repo is public. No names of family, his school, his city, his university, his teacher's company, or other identifying details in `content.js`. Lipchitz facts in third person are fine. Sentences about Mendy himself go into a private deck: write a JSON array of cards (`{"id":"p5","he":"...","en":"...","note":"..."}`, optional `d` of an existing deck, `q` for open questions, `bad` for fix cards) and give it to him to import in Settings. It syncs through his server. Keep personal JSON under `private/` (gitignored) if you need a local copy.
@@ -32,5 +41,5 @@ The repo is public. No names of family, his school, his city, his university, hi
 ## Notes
 * Speech recognition: Web Speech API (`webkitSpeechRecognition`). Works in Safari on Mac and iPhone (needs Dictation enabled) and in Chrome. Apple's recognizer sometimes silently fixes grammar, so the word diff is a guide; the self rating stays.
 * The drill scores the primary transcript only; alternatives are used only when the primary is clearly a mishearing (score under 0.5).
-* Day counters are stored per device (`S.days[date][deviceId]`) so Mac and iPhone add up. The merge rules exist twice (`mergeState` in `app.js` and in `Code.gs`); keep them identical.
+* Level state (`S.level`) merges by newest `updatedAt`, in both merges. Day counters are stored per device (`S.days[date][deviceId]`) so Mac and iPhone add up. The merge rules exist twice (`mergeState` in `app.js` and in `Code.gs`); keep them identical.
 * AI models are chosen in `Code.gs` (`MODELS`): quick for chat turns and open answer checks, smart for free talk feedback.

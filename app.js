@@ -24,10 +24,30 @@ const store = {
 };
 
 /* ================= state ================= */
-let S = Object.assign({srs:{}, days:{}, speech:[], cards:{updatedAt:"", list:[]}}, store.get("state",{}));
+let S = Object.assign({srs:{}, days:{}, speech:[], cards:{updatedAt:"", list:[]}, level:null}, store.get("state",{}));
+const B = window.BANK || {levels:[], rows:{}, topics:{}};
+const START_LEVEL = 2, MAX_LEVEL = B.levels.length || 1;
+/* Topic of a bank row decides which deck toggle controls it */
+const TOPIC_DECK = {whisky:"whisky", wine:"whisky", music:"music", lipchitz:"lipchitz", lecture:"lecture"};
+const BANK_CARDS = [];
+for(const lv in B.rows){
+  B.rows[lv].forEach((r,i)=>{
+    if(!r) return;
+    const [kind, topic, prompt, en, note, alt] = r;
+    const c = {id:"b"+lv+"-"+String(i+1).padStart(3,"0"), bank:true, lv:Number(lv), topic, en, note:note||undefined, alt:alt||undefined};
+    if(kind==="f"){ c.d="fix"; c.bad=prompt; } else if(kind==="q"){ c.d="ask"; c.q=prompt; } else { c.d="bank"; c.he=prompt; }
+    BANK_CARDS.push(c);
+  });
+}
+function levelState(){
+  if(!S.level||!S.level.lv) S.level={lv:START_LEVEL, updatedAt:"", log:[], hist:[{date:today(), lv:START_LEVEL}]};
+  return S.level;
+}
 const prefs = Object.assign({voice:"", rate:0.9, recLang:"en-US", decks:null, url:"", secret:""}, store.get("prefs",{}));
 function savePrefs(){ store.set("prefs",prefs); }
 function allCards(){ return C.cards.concat((S.cards&&S.cards.list)||[]); }
+function everyCard(){ return allCards().concat(BANK_CARDS); }
+const cardById = id => everyCard().find(c=>c.id===id);
 
 /* Merge rules (the server applies the same rules) */
 function mergeState(a,b){
@@ -52,6 +72,8 @@ function mergeState(a,b){
   out.speech=[...seen.values()].sort((p,q)=>q.at.localeCompare(p.at)).slice(0,60);
   const ca=a.cards||{}, cb=b.cards||{};
   out.cards = (ca.updatedAt||"")>=(cb.updatedAt||"") ? (ca.list?ca:{updatedAt:"",list:[]}) : cb;
+  const la=a.level, lb=b.level;
+  out.level = !la ? (lb||null) : !lb ? la : ((la.updatedAt||"")>=(lb.updatedAt||"") ? la : lb);
   return out;
 }
 
@@ -245,21 +267,62 @@ function renderWords(best){
 const SESSION=12, NEW_PER_DAY=8, INTERVAL=[0,1,2,4,7,14];
 let enabled = new Set(prefs.decks || Object.keys(C.decks));
 let queue=[], pos=0, phase="ask", heard=null, suggested=0, rec=null;
+function bankAllowed(c){ const dk=TOPIC_DECK[c.topic]; return !dk || enabled.has(dk); }
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+/* Fresh sentences: unseen bank rows at the current level, one stretch row from the level above,
+   topics mixed. Falls back to neighbouring levels when the current one runs out. */
+function freshBank(n){
+  const lv=levelState().lv, unseen=BANK_CARDS.filter(c=>!S.srs[c.id]&&bankAllowed(c));
+  const at=k=>shuffle(unseen.filter(c=>c.lv===k));
+  let pick=[]; const stretch=at(lv+1).slice(0,1);
+  const main=at(lv);
+  const byTopic={}; main.forEach(c=>(byTopic[c.topic]=byTopic[c.topic]||[]).push(c));
+  let more=true; while(more&&pick.length<n-stretch.length){ more=false; for(const k of shuffle(Object.keys(byTopic))){ const c=byTopic[k].shift(); if(c&&pick.length<n-stretch.length){ pick.push(c); more=true; } } }
+  pick=pick.concat(stretch);
+  for(const k of [lv-1,lv+1,lv-2,lv+2]) if(pick.length<n) pick=pick.concat(at(k).filter(c=>!pick.includes(c)).slice(0,n-pick.length));
+  return pick;
+}
 function buildSession(){
-  const t=today(), pool=allCards().filter(c=>enabled.has(c.d)&&C.decks[c.d]);
-  const due=pool.filter(c=>S.srs[c.id]&&S.srs[c.id].due<=t).sort((a,b)=>S.srs[a.id].due.localeCompare(S.srs[b.id].due)||(S.srs[a.id].box-S.srs[b.id].box));
-  const newToday=Object.values(S.srs).filter(r=>r.first===t).length;
-  const byDeck={}; pool.filter(c=>!S.srs[c.id]).forEach(c=>(byDeck[c.d]=byDeck[c.d]||[]).push(c));
-  const mixed=[]; let more=true; while(more){ more=false; for(const k in byDeck){ const c=byDeck[k].shift(); if(c){ mixed.push(c); more=true; } } }
-  const room=Math.max(0,SESSION-due.length);
-  queue=due.slice(0,SESSION).concat(mixed.slice(0,Math.min(room,Math.max(0,NEW_PER_DAY-newToday))));
+  const t=today();
+  const fixed=allCards().filter(c=>enabled.has(c.d)&&C.decks[c.d]);
+  const reviewPool=fixed.concat(BANK_CARDS.filter(c=>bankAllowed(c)));
+  const due=reviewPool.filter(c=>S.srs[c.id]&&S.srs[c.id].due<=t).sort((a,b)=>S.srs[a.id].due.localeCompare(S.srs[b.id].due)||(S.srs[a.id].box-S.srs[b.id].box)).slice(0,7);
+  const newToday=Object.values(S.srs).filter(r=>r.first===t&&!r.bank).length;
+  const lessonNew=fixed.filter(c=>!S.srs[c.id]).sort((a,b)=>(a.d==="lesson"?0:1)-(b.d==="lesson"?0:1)).slice(0,Math.min(3,Math.max(0,NEW_PER_DAY-newToday)));
+  const fresh=freshBank(Math.max(4,SESSION-due.length-lessonNew.length));
+  queue=shuffle(due.concat(lessonNew,fresh));
   pos=0; phase="ask"; heard=null;
+}
+function moreFresh(){ queue=freshBank(10); pos=0; phase="ask"; heard=null; renderDrill(); }
+/* Level engine: first attempts at bank sentences of the current level decide promotion. */
+const LV_WINDOW=25, LV_MIN_DOWN=15;
+function levelScore(level, acc){ const byRate={1:95,2:72,3:35}[level]; return acc==null ? byRate : Math.round((acc+byRate)/2); }
+function recordLevel(c, level){
+  const L=levelState();
+  if(c.lv!==L.lv) return;
+  L.log.push({s:levelScore(level, heard&&!heard.open?Math.round(heard.score*100):null), f:level===1?1:0, m:level===3?1:0});
+  L.log=L.log.slice(-LV_WINDOW); L.updatedAt=new Date().toISOString();
+  const n=L.log.length, avg=L.log.reduce((a,b)=>a+b.s,0)/n, flu=L.log.reduce((a,b)=>a+b.f,0)/n, miss=L.log.reduce((a,b)=>a+b.m,0)/n;
+  let change=0;
+  if(n>=LV_WINDOW && avg>=85 && flu>=0.7 && L.lv<MAX_LEVEL) change=1;
+  else if(n>=LV_MIN_DOWN && (avg<60||miss>=0.4) && L.lv>1) change=-1;
+  if(change){
+    L.lv+=change; L.log=[]; L.hist.push({date:today(), lv:L.lv});
+    toast(change>0 ? "עלית לרמה "+L.lv+": "+B.levels[L.lv-1].name : "חוזרים לרמה "+L.lv+" לחיזוק. זה חלק מהדרך.");
+  }
+}
+function toast(msg){
+  const t=el("div",{class:"toast",role:"status",text:msg}); document.body.append(t);
+  setTimeout(()=>t.classList.add("show"),20); setTimeout(()=>{ t.classList.remove("show"); setTimeout(()=>t.remove(),400); },4200);
 }
 function rate(level){
   const c=queue[pos]; if(!c) return;
   const t=today(), r=Object.assign({box:0,seen:0,miss:0,first:t}, S.srs[c.id]);
   r.seen++; r.last=new Date().toISOString();
-  if(level===1) r.box=Math.min(5,r.box+1); else if(level===2) r.box=Math.max(1,r.box); else { r.box=1; r.miss++; }
+  const firstBank = c.bank && r.seen===1;
+  if(c.bank) r.bank=1;
+  if(level===1) r.box = firstBank ? 4 : Math.min(5,r.box+1); else if(level===2) r.box=Math.max(1,r.box); else { r.box=1; r.miss++; }
+  if(firstBank) recordLevel(c, level);
   if(heard) r.acc=Math.round(heard.score*100);
   r.due = level===3 ? t : addDays(t, INTERVAL[r.box]);
   S.srs[c.id]=r;
@@ -310,11 +373,14 @@ function renderDrill(){
       el("div",{class:"row center"},
         el("button",{class:"b primary",type:"button",onclick:()=>showTab("chat"),text:"לשיחה"}),
         el("button",{class:"b",type:"button",onclick:()=>showTab("free"),text:"לדקה החופשית"}),
-        el("button",{class:"b",type:"button",onclick:extraRound,text:"עוד סבב חזרה"}))));
+        el("button",{class:"b",type:"button",onclick:moreFresh,text:"עוד 10 משפטים חדשים"}),
+        el("button",{class:"b",type:"button",onclick:extraRound,text:"סבב חזרה"}))));
     return;
   }
   const deck=C.decks[c.d]||{tag:""};
-  st.append(el("span",{class:"tag",text:deck.tag}));
+  const isNew=c.bank&&!S.srs[c.id];
+  const tagText = c.bank ? ((isNew?"חדש":"חזרה")+" · רמה "+c.lv+(c.d==="fix"?" · מצא ותקן":c.d==="ask"?" · שאלה פתוחה":"")) : deck.tag;
+  st.append(el("span",{class:"tag",text:tagText}));
   st.append(el("div",{class:"prompt"+(c.d==="fix"||c.d==="ask"?" en":""),text:promptOf(c)}));
   if(c.d==="ask") st.append(el("div",{class:"row"},el("button",{class:"b",type:"button",onclick:()=>say(c.q),text:"השמע את השאלה"})));
   st.append(el("div",{class:"instr",text: c.d==="fix"?"אמור בקול את המשפט הנכון." : c.d==="ask"?"ענה בקול במשפט שלם, על עצמך." : "אמור את זה באנגלית, בקול."}));
@@ -369,7 +435,7 @@ function checkOpenAnswer(c, said){
   return box;
 }
 function extraRound(){
-  const pool=allCards().filter(c=>enabled.has(c.d)&&S.srs[c.id]).sort((a,b)=>(S.srs[a.id].box-S.srs[b.id].box)||((S.srs[b.id].miss||0)-(S.srs[a.id].miss||0)));
+  const pool=everyCard().filter(c=>(c.bank?bankAllowed(c):enabled.has(c.d))&&S.srs[c.id]).sort((a,b)=>(S.srs[a.id].box-S.srs[b.id].box)||((S.srs[b.id].miss||0)-(S.srs[a.id].miss||0)));
   queue=pool.slice(0,10); pos=0; phase="ask"; heard=null; renderDrill();
 }
 function renderDecks(){
@@ -463,10 +529,11 @@ $("#chatEnd").onclick=()=>{
 };
 
 /* ================= free talk ================= */
-let topicIdx=Math.floor(Math.random()*C.topics.length), freeRec=null, freeT=null, freeStart=0, freeBase="", freeEntry=null;
-function renderTopic(){ const t=C.topics[topicIdx]; $("#topicEn").textContent=t.en; $("#topicHe").textContent=t.he; }
-$("#nextTopic").onclick=()=>{ topicIdx=(topicIdx+1)%C.topics.length; renderTopic(); };
-$("#listenTopic").onclick=()=>say(C.topics[topicIdx].en);
+let curTopic=null, freeRec=null, freeT=null, freeStart=0, freeBase="", freeEntry=null;
+function topicPool(){ const lv=levelState().lv; let p=(B.topics[lv]||[]).concat(B.topics[lv-1]||[]); if(lv>=4) p=p.concat(C.topics); return p.length?p:C.topics; }
+function renderTopic(){ const p=topicPool().filter(t=>!curTopic||t.en!==curTopic.en); curTopic=p[Math.floor(Math.random()*p.length)]; $("#topicEn").textContent=curTopic.en; $("#topicHe").textContent=curTopic.he; }
+$("#nextTopic").onclick=()=>renderTopic();
+$("#listenTopic").onclick=()=>say(curTopic.en);
 $("#freeGo").onclick=()=>{ if(freeT) stopFree(); else startFree(); };
 function startFree(){
   freeBase=$("#speech").value.trim(); freeStart=Date.now(); $("#fb").hidden=true; freeEntry=null;
@@ -497,7 +564,7 @@ function finishFree(){
   if(n<3){ $("#freeStats").textContent=recOK?"כמעט לא נקלט דיבור. אפשר לנסות שוב.":""; return; }
   const wpm=Math.round(n/(secs/60));
   $("#freeStats").textContent=n+" מילים, "+wpm+" מילים לדקה. לדובר שוטף בשיחה רגילה זה בערך 120 עד 150.";
-  freeEntry={at:new Date().toISOString(), date:today(), kind:"free", topic:C.topics[topicIdx].en, text:said.slice(0,2500), words:n, wpm, secs:Math.round(secs)};
+  freeEntry={at:new Date().toISOString(), date:today(), kind:"free", topic:curTopic.en, text:said.slice(0,2500), words:n, wpm, secs:Math.round(secs)};
   S.speech.unshift(freeEntry); dayRec().free=(dayRec().free||0)+1; persist();
   if(server.ready()) $("#fbBtn").focus();
 }
@@ -508,12 +575,12 @@ $("#fbBtn").onclick=async()=>{
   if(!server.ready()){ $("#fbStatus").textContent="התיקונים דורשים חיבור לשרת (בהגדרות)."; return; }
   $("#fbBtn").disabled=true; $("#fbStatus").textContent="בודק...";
   try{
-    const t=await server.ai("smart", SYSTEM_COACH, [{role:"user",content:"He spoke for one minute on this topic: "+C.topics[topicIdx].en+"\nHis words:\n\"\"\""+text.slice(0,3000)+"\"\"\"\nReply with only a JSON object: {\"corrected\": his whole answer rewritten in natural, simple spoken English (keep his meaning and level), \"mistakes\": [{\"wrong\": his exact phrase, \"right\": corrected phrase, \"why\": one short Hebrew sentence}] (at most 6, most important first, skip trivial ones), \"good\": one specific Hebrew sentence on what he did well, \"sayIt\": one useful corrected sentence from his answer to repeat aloud three times}"}], 1200);
+    const t=await server.ai("smart", SYSTEM_COACH, [{role:"user",content:"He spoke for one minute on this topic: "+curTopic.en+"\nHis words:\n\"\"\""+text.slice(0,3000)+"\"\"\"\nReply with only a JSON object: {\"corrected\": his whole answer rewritten in natural, simple spoken English (keep his meaning and level), \"mistakes\": [{\"wrong\": his exact phrase, \"right\": corrected phrase, \"why\": one short Hebrew sentence}] (at most 6, most important first, skip trivial ones), \"good\": one specific Hebrew sentence on what he did well, \"sayIt\": one useful corrected sentence from his answer to repeat aloud three times}"}], 1200);
     const fb=parseJson(t);
     if(!fb) throw {code:"bad_json"};
     renderFeedback(fb);
     if(freeEntry && text.includes(freeEntry.text.slice(0,40))) freeEntry.feedback=fb;
-    else { freeEntry={at:new Date().toISOString(), date:today(), kind:"free", topic:C.topics[topicIdx].en, text:text.slice(0,2500), words:tokens(text).length, feedback:fb}; S.speech.unshift(freeEntry); }
+    else { freeEntry={at:new Date().toISOString(), date:today(), kind:"free", topic:curTopic.en, text:text.slice(0,2500), words:tokens(text).length, feedback:fb}; S.speech.unshift(freeEntry); }
     touch(); persist(); $("#fbStatus").textContent="";
   }catch(e){ $("#fbStatus").textContent = e.code==="unauthorized"?"הסיסמה לא תואמת לשרת.":e.code==="daily_limit"?"הגעת למגבלת השימוש היומית בשרת.":"משהו נתקע. נסה שוב."; }
   $("#fbBtn").disabled=false;
@@ -568,20 +635,34 @@ function renderProgress(){
   const said=sum("said"), acc=said?Math.round(sum("accSum")/Math.max(1,said)):0;
   const learned=Object.values(S.srs).filter(r=>r.box>=3).length;
   const st=$("#stats"); st.textContent="";
-  [[Math.round(sum("activeSec")/60),"דקות סך הכל"],[sum("rated"),"משפטים שתורגלו"],[acc+"%","דיוק בזיהוי"],[learned+"/"+allCards().length,"משפטים יציבים"]]
+  [[Math.round(sum("activeSec")/60),"דקות סך הכל"],[sum("rated"),"משפטים שתורגלו"],[acc+"%","דיוק בזיהוי"],[learned+"/"+everyCard().length,"משפטים יציבים"]]
     .forEach(([v,l])=>st.append(el("div",{class:"stat"},el("b",{text:String(v)}),el("span",{text:l}))));
   renderSpark();
+  renderLevel();
   const bx=$("#boxes"); bx.textContent="";
-  for(let b=0;b<=5;b++){ const n=b===0?allCards().filter(c=>!S.srs[c.id]).length:Object.values(S.srs).filter(r=>r.box===b).length; bx.append(el("div",{},el("b",{text:String(n)}),document.createTextNode(b===0?"לא נראו":"תא "+b))); }
+  for(let b=0;b<=5;b++){ const n=b===0?everyCard().filter(c=>!S.srs[c.id]).length:Object.values(S.srs).filter(r=>r.box===b).length; bx.append(el("div",{},el("b",{text:String(n)}),document.createTextNode(b===0?"לא נראו":"תא "+b))); }
   const wk=$("#weak"); wk.textContent="";
-  const weak=allCards().filter(c=>S.srs[c.id]&&(S.srs[c.id].miss||0)>0).sort((a,b)=>(S.srs[b.id].miss-S.srs[a.id].miss)||(S.srs[a.id].box-S.srs[b.id].box)).slice(0,6);
+  const weak=everyCard().filter(c=>S.srs[c.id]&&(S.srs[c.id].miss||0)>0).sort((a,b)=>(S.srs[b.id].miss-S.srs[a.id].miss)||(S.srs[a.id].box-S.srs[b.id].box)).slice(0,6);
   if(!weak.length) wk.append(el("p",{class:"muted",text:"עדיין אין. כאן יופיעו המשפטים שסימנת \"לא הצלחתי\"."}));
-  for(const c of weak) wk.append(el("div",{class:"item"},el("span",{class:"en",text:c.en}),el("span",{class:"meta",text:(C.decks[c.d]||{}).name+" · לא הצליח "+S.srs[c.id].miss+" פעמים · תא "+S.srs[c.id].box+(S.srs[c.id].acc!=null?" · דיוק אחרון "+S.srs[c.id].acc+"%":"")})));
+  for(const c of weak) wk.append(el("div",{class:"item"},el("span",{class:"en",text:c.en}),el("span",{class:"meta",text:(c.bank?"רמה "+c.lv:(C.decks[c.d]||{}).name)+" · לא הצליח "+S.srs[c.id].miss+" פעמים · תא "+S.srs[c.id].box+(S.srs[c.id].acc!=null?" · דיוק אחרון "+S.srs[c.id].acc+"%":"")})));
   const sl=$("#speechLog"); sl.textContent="";
   const withFix=S.speech.filter(r=>r.feedback&&Array.isArray(r.feedback.mistakes)&&r.feedback.mistakes.length).slice(0,5);
   if(!withFix.length) sl.append(el("p",{class:"muted",text:"עדיין אין. תיקונים מהשיחה ומהדקה החופשית יישמרו כאן."}));
   for(const r of withFix){ const it=el("div",{class:"item"}); it.append(el("span",{class:"meta",text:(r.date||"")+" · "+(r.kind==="chat"?"שיחה: ":"")+(r.topic||"")}));
     for(const m of r.feedback.mistakes.slice(0,4)) it.append(fixEl(m,false)); sl.append(it); }
+}
+function renderLevel(){
+  const box=$("#levelBox"); if(!box) return; box.textContent="";
+  const L=levelState(), info=B.levels[L.lv-1]||{name:"",desc:""};
+  const n=L.log.length, avg=n?Math.round(L.log.reduce((a,b)=>a+b.s,0)/n):0, flu=n?Math.round(100*L.log.reduce((a,b)=>a+b.f,0)/n):0;
+  box.append(el("div",{class:"row between"},el("b",{class:"lvname",text:"רמה "+L.lv+" מתוך "+MAX_LEVEL+": "+info.name}),el("span",{class:"muted small",text:info.desc})));
+  const steps=el("div",{class:"lvsteps"}); for(let i=1;i<=MAX_LEVEL;i++) steps.append(el("i",{class:i<L.lv?"past":i===L.lv?"cur":""})); box.append(steps);
+  box.append(el("p",{class:"muted small",text: n
+    ? "ברמה הנוכחית: "+n+" מתוך "+LV_WINDOW+" משפטים חדשים. ציון ממוצע "+avg+", שוטף "+flu+"%. עולים רמה כשהממוצע 85 ומעלה ולפחות 70% שוטף."
+    : "הרמה נקבעת לפי הניסיון הראשון בכל משפט חדש. אחרי "+LV_WINDOW+" משפטים מהרמה הזאת האפליקציה מחליטה אם לעלות."}));
+  const seen=BANK_CARDS.filter(c=>c.lv===L.lv&&S.srs[c.id]).length, tot=BANK_CARDS.filter(c=>c.lv===L.lv).length;
+  box.append(el("p",{class:"muted small",text:"משפטים ברמה הזאת שכבר ראית: "+seen+" מתוך "+tot+"."}));
+  if(L.hist.length>1) box.append(el("p",{class:"muted small",text:"היסטוריה: "+L.hist.map(h=>h.date.slice(5).split("-").reverse().join(".")+" רמה "+h.lv).join(", ")}));
 }
 function renderSpark(){
   const box=$("#wpm"); box.textContent="";
@@ -600,9 +681,10 @@ function renderSpark(){
 function summaryText(){
   const sc=computeScore(), t=today(), L=[];
   L.push("סיכום חדר הדיבור, "+t);
+  L.push("רמה "+levelState().lv+" ("+(B.levels[levelState().lv-1]||{}).name+"), "+levelState().log.length+" ניסיונות ברמה, ציון ממוצע "+(levelState().log.length?Math.round(levelState().log.reduce((a,b)=>a+b.s,0)/levelState().log.length):0));
   L.push("ציון התמדה "+sc.score+" ("+scoreLabel(sc.score)+"), רצף "+sc.streak+", ימי אימון "+sc.active+" מתוך "+sc.window+", ממוצע "+Math.round(sc.avgMin)+" דק'.");
   for(let i=13;i>=0;i--){ const d=addDays(t,-i), r=D(d); if(r.activeSec) L.push(d+": "+Math.round(r.activeSec/60)+" דק', "+(r.rated||0)+" משפטים ("+(r.good||0)+"/"+(r.hard||0)+"/"+(r.miss||0)+"), דיוק "+(r.said?Math.round(r.accSum/r.said):0)+"%, דקות חופשיות "+(r.free||0)+", תורות שיחה "+(r.chat||0)); }
-  const weak=allCards().filter(c=>S.srs[c.id]&&(S.srs[c.id].miss||0)>0).map(c=>c.id+": "+c.en+" (x"+S.srs[c.id].miss+")");
+  const weak=everyCard().filter(c=>S.srs[c.id]&&(S.srs[c.id].miss||0)>0).map(c=>c.id+": "+c.en+" (x"+S.srs[c.id].miss+")");
   if(weak.length) L.push("נתקע ב: "+weak.join(" | "));
   const w=S.speech.filter(r=>r.wpm).slice(0,8).map(r=>r.date+" "+r.wpm); if(w.length) L.push("מילים לדקה: "+w.join(", "));
   for(const r of S.speech.filter(r=>r.feedback&&r.feedback.mistakes&&r.feedback.mistakes.length).slice(0,6)) L.push((r.kind==="chat"?"שיחה ":"דקה ")+r.date+": "+r.feedback.mistakes.map(m=>m.wrong+" > "+m.right).join("; "));

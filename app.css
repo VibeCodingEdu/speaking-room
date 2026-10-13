@@ -153,3 +153,13 @@ button.item:hover{border-color:var(--sea)}
   .wrap{padding-bottom:48px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* level */
+.lvname{font-family:var(--f-display);font-size:1.2rem}
+.lvsteps{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.lvsteps i{height:8px;border-radius:4px;background:var(--sunk)}
+.lvsteps i.past{background:var(--sea)}
+.lvsteps i.cur{background:var(--accent)}
+#levelBox p{margin:0}
+.toast{position:fixed;inset-inline:16px;bottom:calc(var(--nav) + env(safe-area-inset-bottom,0px) + 16px);margin:0 auto;max-width:440px;background:var(--fg);color:var(--bg);padding:12px 16px;border-radius:12px;font-weight:600;text-align:center;opacity:0;transform:translateY(10px);transition:opacity .3s,transform .3s;z-index:20}
+.toast.show{opacity:1;transform:none}

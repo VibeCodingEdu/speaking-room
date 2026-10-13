@@ -53,7 +53,7 @@ function putBig(key, obj) {
   for (let i = n; i < old; i++) P.deleteProperty(key + '#' + i);
 }
 function readState() {
-  return { srs: getBig('srs', {}), days: getBig('days', {}), speech: getBig('speech', []), cards: getBig('cards', { updatedAt: '', list: [] }) };
+  return { srs: getBig('srs', {}), days: getBig('days', {}), speech: getBig('speech', []), cards: getBig('cards', { updatedAt: '', list: [] }), level: getBig('level', null) };
 }
 function saveState(incoming) {
   const lock = LockService.getScriptLock();
@@ -64,6 +64,7 @@ function saveState(incoming) {
     putBig('days', merged.days);
     putBig('speech', merged.speech);
     putBig('cards', merged.cards);
+    if (merged.level) putBig('level', merged.level);
     return merged;
   } finally { lock.releaseLock(); }
 }
@@ -97,6 +98,8 @@ function mergeState(a, b) {
     .sort(function (p, q) { return q.at < p.at ? -1 : q.at > p.at ? 1 : 0; }).slice(0, 60);
   const ca = a.cards || {}, cb = b.cards || {};
   res.cards = (ca.updatedAt || '') >= (cb.updatedAt || '') ? (ca.list ? ca : { updatedAt: '', list: [] }) : cb;
+  const la = a.level, lb = b.level;
+  res.level = !la ? (lb || null) : !lb ? la : ((la.updatedAt || '') >= (lb.updatedAt || '') ? la : lb);
   return res;
 }
 
