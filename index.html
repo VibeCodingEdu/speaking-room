@@ -147,13 +147,10 @@
       </div>
       <div class="stage">
         <h2>כרטיסים אישיים</h2>
-        <p class="muted small">משפטים עליך נשמרים רק בשרת שלך ולא בריפו הציבורי. מדביקים כאן את קובץ ה-JSON ש-Claude מכין, או בוחרים קובץ.</p>
-        <textarea id="cardsIn" class="en" placeholder='[{"id":"p1","he":"...","en":"..."}]'></textarea>
-        <div class="row">
-          <button class="b primary" type="button" id="cardsImport">ייבא</button>
-          <label class="b" for="cardsFile">בחר קובץ<input type="file" id="cardsFile" accept=".json,application/json" hidden></label>
-          <span class="muted" id="cardsMsg"></span>
-        </div>
+        <p class="muted small">המשפטים עליך שמורים בריפו בהצפנה, ונפתחים רק במכשיר שיש בו את המפתח. מספיק לפתוח פעם אחת בכל מכשיר את הקישור האישי.</p>
+        <p class="small" id="pkStatus"></p>
+        <label class="field" for="pkInput">מפתח (רק אם לא פתחת את הקישור)<input id="pkInput" class="en" type="password" autocomplete="off"></label>
+        <div class="row"><button class="b" type="button" id="pkSave">שמור מפתח</button><span class="muted" id="pkMsg"></span></div>
       </div>
     </section>
   </main>

@@ -46,7 +46,8 @@ function levelState(){
 }
 const prefs = Object.assign({voice:"", rate:0.9, recLang:"en-US", decks:null, url:"", secret:""}, store.get("prefs",{}));
 function savePrefs(){ store.set("prefs",prefs); }
-function allCards(){ return C.cards.concat((S.cards&&S.cards.list)||[]); }
+let PERSONAL=[];
+function allCards(){ const ids=new Set(PERSONAL.map(c=>c.id)); return C.cards.concat(PERSONAL, ((S.cards&&S.cards.list)||[]).filter(c=>!ids.has(c.id))); }
 function everyCard(){ return allCards().concat(BANK_CARDS); }
 const cardById = id => everyCard().find(c=>c.id===id);
 
@@ -446,7 +447,7 @@ function extraRound(){
 }
 function renderDecks(){
   const box=$("#deckPick"); box.textContent="";
-  const hasPersonal=((S.cards&&S.cards.list)||[]).length>0;
+  const hasPersonal=allCards().some(c=>c.d==="personal");
   for(const k in C.decks){
     if(k==="personal"&&!hasPersonal) continue;
     const id="deck-"+k, cb=el("input",{type:"checkbox",id});
@@ -715,8 +716,8 @@ $("#srvSave").onclick=async()=>{
   catch(e){ $("#srvMsg").textContent = e.code==="unauthorized"?"הסיסמה שגויה.":e.code==="no_server"?"חסרה כתובת או סיסמה.":"השרת לא עונה. בדוק את הכתובת."; }
 };
 $("#srvLink").onclick=async()=>{
-  if(!server.ready()){ $("#srvMsg").textContent="קודם שמור כתובת וסיסמה."; return; }
-  const code=btoa(unescape(encodeURIComponent(JSON.stringify({u:prefs.url,s:prefs.secret})))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  if(!server.ready()&&!prefs.pkey){ $("#srvMsg").textContent="אין עדיין מה להעביר."; return; }
+  const code=btoa(unescape(encodeURIComponent(JSON.stringify({u:prefs.url,s:prefs.secret,k:prefs.pkey||undefined})))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
   const link=location.origin+location.pathname+"#setup="+code;
   try{ await navigator.clipboard.writeText(link); $("#srvMsg").textContent="הקישור הועתק. שלח אותו לעצמך ופתח באייפון ב-Safari."; }
   catch(e){ $("#srvMsg").textContent=link; }
@@ -729,25 +730,27 @@ $("#micTest").onclick=()=>{
   out.textContent="דבר עכשיו...";
   listen({onText:t=>out.textContent=t, onDone:t=>out.textContent=t?("נקלט: "+t):"לא נקלט כלום.", onError:c=>out.textContent=micErrorText(c)});
 };
-function importCards(raw){
-  let data; try{ data=JSON.parse(raw); }catch(e){ return "הטקסט אינו JSON תקין."; }
-  const list=(Array.isArray(data)?data:data.cards)||[];
-  const ok=[];
-  for(const c of list){
-    if(!c||!c.id||!c.en) continue;
-    const d = C.decks[c.d] ? c.d : "personal";
-    if(!(c.he||c.q||c.bad)) continue;
-    ok.push({id:"p:"+String(c.id).replace(/^p:/,""), d, he:c.he, q:c.q, bad:c.bad, en:c.en, alt:Array.isArray(c.alt)?c.alt:undefined, note:c.note});
-  }
-  if(!ok.length) return "לא נמצאו כרטיסים תקינים.";
-  const map=new Map(((S.cards&&S.cards.list)||[]).map(c=>[c.id,c])); ok.forEach(c=>map.set(c.id,c));
-  S.cards={updatedAt:new Date().toISOString(), list:[...map.values()]};
-  enabled.add("personal"); prefs.decks=[...enabled]; savePrefs();
-  persist(); buildSession(); renderAll();
-  return "נוספו "+ok.length+" כרטיסים. סך הכל אישיים: "+S.cards.list.length+".";
+/* Personal cards: personal.enc.json (AES-GCM, key from PBKDF2 of the personal key). See tools/personal.mjs. */
+function normCard(c){
+  if(!c||!c.id||!c.en||!(c.he||c.q||c.bad||c.src)) return null;
+  return {id:"p:"+String(c.id).replace(/^p:/,""), d:C.decks[c.d]?c.d:"personal", he:c.he, q:c.q, bad:c.bad, src:c.src, task:c.task, en:c.en, alt:Array.isArray(c.alt)?c.alt:undefined, note:c.note};
 }
-$("#cardsImport").onclick=()=>{ $("#cardsMsg").textContent=importCards($("#cardsIn").value.trim()); };
-$("#cardsFile").onchange=e=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ $("#cardsMsg").textContent=importCards(String(r.result)); }; r.readAsText(f); };
+async function loadPersonal(){
+  const st=$("#pkStatus");
+  if(!prefs.pkey){ if(st) st.textContent="לא פעיל במכשיר הזה."; return false; }
+  try{
+    const o=await (await fetch("personal.enc.json",{cache:"no-store"})).json();
+    const u=s=>Uint8Array.from(atob(s),ch=>ch.charCodeAt(0));
+    const base=await crypto.subtle.importKey("raw",new TextEncoder().encode(prefs.pkey),"PBKDF2",false,["deriveKey"]);
+    const key=await crypto.subtle.deriveKey({name:"PBKDF2",salt:u(o.salt),iterations:o.iter,hash:"SHA-256"},base,{name:"AES-GCM",length:256},false,["decrypt"]);
+    const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:u(o.iv)},key,u(o.data));
+    PERSONAL=JSON.parse(new TextDecoder().decode(pt)).map(normCard).filter(Boolean);
+    enabled.add("personal");
+    if(st) st.textContent="פעיל: "+PERSONAL.length+" משפטים אישיים.";
+    return true;
+  }catch(e){ if(st) st.textContent="המפתח לא מתאים, או שהקובץ לא נטען."; return false; }
+}
+$("#pkSave").onclick=async()=>{ prefs.pkey=$("#pkInput").value.trim(); savePrefs(); $("#pkMsg").textContent=(await loadPersonal())?"נשמר.":"לא הצליח."; buildSession(); renderAll(); };
 
 /* ================= tabs ================= */
 function showTab(p){
@@ -763,16 +766,18 @@ $("#hdrChip").onclick=()=>showTab("prog");
 function renderAll(){ renderHeader(); renderDecks(); renderDrill(); if(!$("#p-prog").hidden) renderProgress(); if(!$("#p-chat").hidden&&!chat) renderChatList(); }
 
 /* ================= boot ================= */
+if(location.hash.startsWith("#k=")){ prefs.pkey=decodeURIComponent(location.hash.slice(3)); savePrefs(); history.replaceState(null,"",location.pathname); }
 if(location.hash.startsWith("#setup=")){
   try{
     const b=location.hash.slice(7).replace(/-/g,"+").replace(/_/g,"/");
     const o=JSON.parse(decodeURIComponent(escape(atob(b))));
-    if(o.u&&o.s){ prefs.url=o.u; prefs.secret=o.s; savePrefs(); }
+    if(o.u&&o.s){ prefs.url=o.u; prefs.secret=o.s; } if(o.k) prefs.pkey=o.k; savePrefs();
   }catch(e){}
   history.replaceState(null,"",location.pathname);
 }
 buildSession(); renderTopic(); renderAll();
 showTab(store.get("tab","drill"));
+loadPersonal().then(ok=>{ if(ok){ buildSession(); renderAll(); } });
 pullState().then(ok=>{ if(ok){ buildSession(); renderAll(); } });
 if("serviceWorker" in navigator && location.protocol==="https:") navigator.serviceWorker.register("sw.js").catch(()=>{});
 })();
