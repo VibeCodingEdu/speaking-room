@@ -241,7 +241,8 @@ function listenWeb(opts){
 }
 /* ===== On-device engine: records with the microphone and transcribes with Whisper in the browser.
    Independent of Apple's / Google's recognizer, works in the home screen app. Model downloads once (~80MB) and is cached. */
-const WHISPER_MODEL = "Xenova/whisper-base.en";
+/* base.en is more accurate; tiny.en is the fallback when Hugging Face refuses the download (it rate-limits anonymous downloads). */
+const WHISPER_MODELS = ["Xenova/whisper-base.en", "Xenova/whisper-tiny.en"];
 let whisperPipe=null, whisperLoading=null;
 function loadWhisper(onProgress){
   if(window.__mockWhisper) return Promise.resolve(window.__mockWhisper);
@@ -249,10 +250,21 @@ function loadWhisper(onProgress){
   if(!whisperLoading){
     whisperLoading = import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2").then(async T=>{
       T.env.allowLocalModels=false;
-      whisperPipe = await T.pipeline("automatic-speech-recognition", WHISPER_MODEL, {
-        progress_callback: p=>{ if(p&&p.status==="progress"&&p.total>1e6) onProgress&&onProgress(Math.round(p.progress||0)); }
-      });
-      return whisperPipe;
+      const ok=store.get("whisperModel",null);
+      const order = ok ? [ok].concat(WHISPER_MODELS.filter(m=>m!==ok)) : WHISPER_MODELS;
+      let lastErr=null;
+      for(const m of order){
+        for(let attempt=0; attempt<2; attempt++){
+          try{
+            whisperPipe = await T.pipeline("automatic-speech-recognition", m, {
+              progress_callback: p=>{ if(p&&p.status==="progress"&&p.total>1e6) onProgress&&onProgress(Math.round(p.progress||0)); }
+            });
+            store.set("whisperModel", m); console.log("[speaking-room] model:", m);
+            return whisperPipe;
+          }catch(e){ lastErr=e; console.warn("[speaking-room] model failed:", m, String(e).slice(0,160)); await new Promise(r=>setTimeout(r,2500)); }
+        }
+      }
+      throw lastErr;
     }).catch(e=>{ whisperLoading=null; throw e; });
   }
   return whisperLoading;
