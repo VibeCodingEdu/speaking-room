@@ -179,9 +179,10 @@ function say(text, onend){
 
 /* ================= voice in ================= */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-const recOK = !!SR;
+const HAS_GUM = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+const recOK = !!SR || HAS_GUM;
 const IS_STANDALONE = !!(window.navigator.standalone || (window.matchMedia && matchMedia("(display-mode: standalone)").matches));
-function listen(opts){
+function listenWeb(opts){
   /* opts: {continuous, onText(text), onStatus(stage), onDone(finalText, alts), onError(code)}
      stages: "starting" > "audio" (mic open) > "sound" > "speech" */
   let stopped=false, finished=false, finals=[], alts=[], rec=null, interim="", gotResult=false, gotAudio=false;
@@ -238,16 +239,117 @@ function listen(opts){
   else { if("speechSynthesis" in window) speechSynthesis.cancel(); begin(); }
   return { stop(){ if(finished) return; stopped=true; try{ rec&&rec.stop(); }catch(e){ finish(); } timers.push(setTimeout(finish, 2500)); } };
 }
+/* ===== On-device engine: records with the microphone and transcribes with Whisper in the browser.
+   Independent of Apple's / Google's recognizer, works in the home screen app. Model downloads once (~40MB) and is cached. */
+const WHISPER_MODEL = "Xenova/whisper-tiny.en";
+let whisperPipe=null, whisperLoading=null;
+function loadWhisper(onProgress){
+  if(window.__mockWhisper) return Promise.resolve(window.__mockWhisper);
+  if(whisperPipe) return Promise.resolve(whisperPipe);
+  if(!whisperLoading){
+    whisperLoading = import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2").then(async T=>{
+      T.env.allowLocalModels=false;
+      whisperPipe = await T.pipeline("automatic-speech-recognition", WHISPER_MODEL, {
+        progress_callback: p=>{ if(p&&p.status==="progress"&&p.total>1e6) onProgress&&onProgress(Math.round(p.progress||0)); }
+      });
+      return whisperPipe;
+    }).catch(e=>{ whisperLoading=null; throw e; });
+  }
+  return whisperLoading;
+}
+function resample(data, from, to){
+  if(from===to) return data;
+  const ratio=from/to, n=Math.floor(data.length/ratio), out=new Float32Array(n);
+  for(let i=0;i<n;i++){ const x=i*ratio, j=Math.floor(x), f=x-j; out[i]=(data[j]||0)*(1-f)+(data[j+1]||0)*f; }
+  return out;
+}
+function listenWhisper(opts){
+  let finished=false, stopped=false, stream=null, ctx=null, node=null, src=null;
+  const chunks=[]; let rate=48000, heardSpeech=false, lastLoud=0, startT=Date.now();
+  const status=st=>opts.onStatus&&opts.onStatus(st);
+  const timers=[];
+  function cleanup(){ timers.forEach(clearTimeout); try{ node&&node.disconnect(); src&&src.disconnect(); }catch(e){} try{ stream&&stream.getTracks().forEach(t=>t.stop()); }catch(e){} try{ ctx&&ctx.close(); }catch(e){} }
+  function fail(code){ if(finished) return; finished=true; cleanup(); opts.onError&&opts.onError(code); }
+  async function finish(){
+    if(finished) return; finished=true; cleanup();
+    if(!heardSpeech){ opts.onDone&&opts.onDone("",[""]); return; }
+    let len=0; chunks.forEach(c=>len+=c.length);
+    const all=new Float32Array(len); let o=0; chunks.forEach(c=>{ all.set(c,o); o+=c.length; });
+    const audio=resample(all, rate, 16000);
+    try{
+      status("loading");
+      const pipe=await loadWhisper(pct=>opts.onStatus&&opts.onStatus("loading",pct));
+      status("transcribing");
+      const out=await pipe(audio, audio.length>16000*28 ? {chunk_length_s:30, stride_length_s:5} : {});
+      let t=String((out&&out.text)||"").replace(/\[[^\]]*\]|\([^)]*\)/g," ").replace(/\s+/g," ").trim();
+      if(/^(thank you\.?|thanks for watching\.?|you)$/i.test(t)) t="";
+      if(t) opts.onText&&opts.onText(t);
+      opts.onDone&&opts.onDone(t,[t]);
+    }catch(e){ opts.onError&&opts.onError("model"); }
+  }
+  /* Audio context must be created inside the tap on iPhone */
+  try{ ctx=new (window.AudioContext||window.webkitAudioContext)(); ctx.resume&&ctx.resume(); rate=ctx.sampleRate; }catch(e){ fail("audio-capture"); return {stop(){}}; }
+  if("speechSynthesis" in window) speechSynthesis.cancel();
+  status("starting");
+  navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}}).then(st=>{
+    if(finished){ st.getTracks().forEach(t=>t.stop()); return; }
+    stream=st; src=ctx.createMediaStreamSource(st);
+    node=ctx.createScriptProcessor(4096,1,1);
+    let noise=0.004;
+    node.onaudioprocess=ev=>{
+      if(finished||stopped) return;
+      const d=ev.inputBuffer.getChannelData(0); chunks.push(new Float32Array(d));
+      let sum=0; for(let i=0;i<d.length;i++) sum+=d[i]*d[i];
+      const rms=Math.sqrt(sum/d.length), now=Date.now();
+      if(now-startT<600) noise=Math.max(noise, rms*1.5);
+      if(rms>Math.max(0.012, noise*2.2)){ lastLoud=now; if(!heardSpeech){ heardSpeech=true; status("speech"); } }
+      /* single answer: stop by itself after a pause */
+      if(!opts.continuous && heardSpeech && now-lastLoud>1500){ stopped=true; finish(); }
+    };
+    src.connect(node); node.connect(ctx.destination);
+    status("audio");
+    timers.push(setTimeout(()=>{ if(!opts.continuous){ stopped=true; finish(); } }, 20000));
+    timers.push(setTimeout(()=>{ if(!opts.continuous && !heardSpeech && !stopped){ stopped=true; finish(); } }, 8000));
+  }).catch(e=>fail(e&&e.name==="NotAllowedError"?"not-allowed":"audio-capture"));
+  return { stop(){ if(finished) return; stopped=true; finish(); } };
+}
+/* Engine choice: "auto" uses the browser recognizer, and switches to the on-device engine for good
+   on this device if the browser recognizer fails. */
+function engineNow(){
+  if(prefs.engine==="web") return SR?"web":"whisper";
+  if(prefs.engine==="whisper") return "whisper";
+  return (!SR || store.get("webFailed",false)) ? "whisper" : "web";
+}
+const WEB_FAIL = new Set(["no-audio","no-result","service-not-allowed","network","language-not-supported","start","audio-capture"]);
+let webEmpty=0;
+function listen(opts){
+  const eng=engineNow();
+  if(eng==="whisper" && HAS_GUM) return listenWhisper(opts);
+  const wrapped=Object.assign({}, opts, {
+    onError:code=>{
+      if(prefs.engine!=="web" && HAS_GUM && WEB_FAIL.has(code)){ store.set("webFailed",true); opts.onError&&opts.onError("switched"); return; }
+      opts.onError&&opts.onError(code);
+    },
+    onDone:(t,a)=>{
+      if(!t && prefs.engine!=="web" && HAS_GUM){ webEmpty++; if(webEmpty>=2){ store.set("webFailed",true); webEmpty=0; opts.onError&&opts.onError("switched"); return; } }
+      else if(t) webEmpty=0;
+      opts.onDone&&opts.onDone(t,a);
+    }
+  });
+  return listenWeb(wrapped);
+}
 function micErrorText(code){
   return ({ "not-allowed":"אין הרשאה למיקרופון. בדפדפן: הגדרות האתר, אפשר מיקרופון.",
             "service-not-allowed":"זיהוי הדיבור כבוי. באייפון: הגדרות, כללי, מקלדת, הפעל הכתבה. במק: הגדרות מערכת, מקלדת, הכתבה.",
             "audio-capture":"לא נמצא מיקרופון.", "network":"אין חיבור לשירות זיהוי הדיבור.",
             "language-not-supported":"השפה לא נתמכת. נסה מבטא אחר בהגדרות.",
+            "switched":"זיהוי הדיבור של הדפדפן לא עובד במכשיר הזה, אז עברתי למנוע זיהוי שרץ בתוך המכשיר. לחץ שוב על המיקרופון ודבר. בפעם הראשונה הוא נטען כחצי דקה.",
+            "model":"מנוע הזיהוי לא נטען. בדוק חיבור לאינטרנט ונסה שוב.",
             "no-audio":"המיקרופון לא נפתח."+(IS_STANDALONE?" באפליקציה שעל מסך הבית אפל חוסמת לפעמים זיהוי דיבור: פתח את האתר ישירות ב-Safari, או השתמש בהכתבה במקלדת למטה.":" בדוק בהגדרות האתר שהמיקרופון מותר, או השתמש בהכתבה במקלדת למטה."),
             "no-result":"המיקרופון פתוח, אבל זיהוי הדיבור לא החזיר מילים."+(IS_STANDALONE?" זה קורה באפליקציה שעל מסך הבית: פתח ישירות ב-Safari, או השתמש בהכתבה במקלדת למטה.":" ודא שהכתבה מופעלת בהגדרות המכשיר, או השתמש בהכתבה במקלדת למטה.") })[code] || "המיקרופון לא הצליח ("+code+"). נסה שוב.";
 }
-const STAGE_TEXT={starting:"פותח מיקרופון...", audio:"מקשיב. דבר עכשיו.", sound:"שומע קול...", speech:"שומע דיבור..."};
-function stageText(st){ return STAGE_TEXT[st]||"";
+const STAGE_TEXT={starting:"פותח מיקרופון...", audio:"מקשיב. דבר עכשיו.", sound:"שומע קול...", speech:"שומע דיבור...", loading:"טוען את מנוע הזיהוי (רק בפעם הראשונה)...", transcribing:"מתמלל..."};
+function stageText(st,pct){ return (STAGE_TEXT[st]||"")+(st==="loading"&&pct?" "+pct+"%":"");
 }
 
 /* ================= comparing ================= */
@@ -381,7 +483,7 @@ function startMic(btn, live){
   btn.classList.add("on"); live.textContent=stageText("starting");
   let words=false;
   rec=listen({
-    onStatus:st=>{ if(!words) live.textContent=stageText(st); },
+    onStatus:(st,p)=>{ if(!words) live.textContent=stageText(st,p); },
     onText:t=>{ words=true; live.textContent=t; },
     onDone:(t,options)=>{
       rec=null; btn.classList.remove("on");
@@ -531,7 +633,7 @@ $("#chatMic").onclick=()=>{
   if(!recOK){ live.textContent="הדפדפן לא תומך בזיהוי דיבור. אפשר להקליד למטה."; return; }
   btn.classList.add("on"); live.dataset.w=""; live.textContent=stageText("starting");
   chatRec=listen({continuous:true,
-    onStatus:st=>{ if(!live.dataset.w) live.textContent=stageText(st); },
+    onStatus:(st,p)=>{ if(!live.dataset.w||st==="transcribing") live.textContent=stageText(st,p); },
     onText:t=>{ live.dataset.w="1"; live.textContent=t; },
     onDone:t=>{ chatRec=null; btn.classList.remove("on"); live.textContent=""; if(t) sendChat(t); },
     onError:code=>{ chatRec=null; btn.classList.remove("on"); live.textContent=micErrorText(code); }});
@@ -583,7 +685,7 @@ function startFree(){
   $("#freeLive").dataset.w="";
   if(recOK){
     freeRec=listen({continuous:true,
-      onStatus:st=>{ if(!$("#freeLive").dataset.w) $("#freeLive").textContent=stageText(st); },
+      onStatus:(st,p)=>{ if(!$("#freeLive").dataset.w||st==="loading"||st==="transcribing") $("#freeLive").textContent=stageText(st,p); },
       onText:t=>{ $("#freeLive").dataset.w="1"; $("#freeLive").textContent=t.split(" ").slice(-14).join(" "); $("#speech").value=(freeBase?freeBase+" ":"")+t; },
       onDone:t=>{ freeRec=null; if(t) $("#speech").value=(freeBase?freeBase+" ":"")+t; $("#freeLive").textContent=""; finishFree(); },
       onError:code=>{ freeRec=null; $("#freeLive").textContent=micErrorText(code); }});
@@ -744,7 +846,9 @@ $("#copySum").onclick=async()=>{
 function fillSettings(){
   $("#srvUrl").value=prefs.url||""; $("#srvSecret").value=prefs.secret||"";
   $("#rateSel").value=String(prefs.rate); $("#recLang").value=prefs.recLang;
-  $("#micSupport").textContent = recOK ? "זיהוי דיבור נתמך בדפדפן הזה." : "הדפדפן הזה לא תומך בזיהוי דיבור. באייפון ובמק: Safari. במחשב אחר: Chrome.";
+  $("#engineSel").value=prefs.engine||"auto";
+  const eng=engineNow();
+  $("#micSupport").textContent = !recOK ? "הדפדפן הזה לא תומך במיקרופון." : eng==="whisper" ? "פעיל עכשיו: מנוע זיהוי בתוך המכשיר (Whisper). בפעם הראשונה הוא מוריד כ-40MB, ואחר כך עובד גם בלי אינטרנט." : "פעיל עכשיו: זיהוי הדיבור של הדפדפן.";
 }
 $("#srvSave").onclick=async()=>{
   prefs.url=$("#srvUrl").value.trim(); prefs.secret=$("#srvSecret").value.trim(); savePrefs();
@@ -762,11 +866,12 @@ $("#srvLink").onclick=async()=>{
 $("#voiceSel").onchange=e=>{ prefs.voice=e.target.value; savePrefs(); say("Smoky whisky comes from Islay."); };
 $("#rateSel").onchange=e=>{ prefs.rate=Number(e.target.value); savePrefs(); say("I listen to Bach when I work."); };
 $("#recLang").onchange=e=>{ prefs.recLang=e.target.value; savePrefs(); };
+$("#engineSel").onchange=e=>{ prefs.engine=e.target.value; savePrefs(); store.set("webFailed",false); fillSettings(); if(prefs.engine==="whisper") loadWhisper(()=>{}).catch(()=>{}); };
 $("#micTest").onclick=()=>{
   const out=$("#micTestOut"); if(!recOK){ out.textContent="לא נתמך כאן."; return; }
   out.textContent="דבר עכשיו...";
   out.textContent=stageText("starting");
-  listen({onStatus:st=>{ out.textContent=stageText(st); }, onText:t=>out.textContent=t, onDone:t=>out.textContent=t?("נקלט: "+t):"המיקרופון נפתח אבל לא חזרו מילים.", onError:c=>out.textContent=micErrorText(c)});
+  listen({onStatus:(st,p)=>{ out.textContent=stageText(st,p); }, onText:t=>out.textContent=t, onDone:t=>out.textContent=t?("נקלט: "+t):"המיקרופון נפתח אבל לא חזרו מילים.", onError:c=>out.textContent=micErrorText(c)});
 };
 /* Personal cards: personal.enc.json (AES-GCM, key from PBKDF2 of the personal key). See tools/personal.mjs. */
 function normCard(c){
@@ -816,6 +921,7 @@ if(location.hash.startsWith("#setup=")){
 buildSession(); renderTopic(); renderAll();
 showTab(store.get("tab","drill"));
 loadPersonal().then(ok=>{ if(ok){ buildSession(); renderAll(); } });
+if(engineNow()==="whisper") setTimeout(()=>loadWhisper(()=>{}).catch(()=>{}), 1500);
 pullState().then(ok=>{ if(ok){ buildSession(); renderAll(); } });
 if("serviceWorker" in navigator && location.protocol==="https:") navigator.serviceWorker.register("sw.js").catch(()=>{});
 })();
